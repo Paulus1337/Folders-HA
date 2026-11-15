@@ -1,6 +1,7 @@
 {
   "domain": "folders",
   "name": "Folders",
+  "categories": ["productivity_information.shopping_groceries"],
   "codeowners": ["@Paulus1337"],
   "config_flow": true,
   "dependencies": ["frontend", "http", "websocket_api"],
