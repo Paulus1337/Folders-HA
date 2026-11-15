@@ -1,0 +1,135 @@
+{
+  "config": {
+    "error": {
+      "cannot_connect": "Kan folders.nl niet bereiken. Probeer het later opnieuw.",
+      "too_many_stores": "Kies hoogstens 60 winkels.",
+      "words": "Gebruik hoogstens 10 zoekwoorden van 2 tot 40 tekens, gescheiden door komma's."
+    },
+    "step": {
+      "user": {
+        "data": {
+          "stores": "Winkels",
+          "words": "Zoekwoorden"
+        },
+        "data_description": {
+          "stores": "Elke winkel die je volgt krijgt een afbeeldingsentiteit met de huidige folder. Hoogstens 60 winkels.",
+          "words": "Hoogstens 10 woorden, gescheiden door komma's, bijvoorbeeld koffie, kaas. Aanbiedingen die bij een woord passen, van winkels die je volgt, verschijnen in de sensor Aanbiedingen."
+        },
+        "description": "Folders-HA is een onofficieel open-source hobbyproject. Het is niet gemaakt, goedgekeurd of ondersteund door folders.nl of een winkel.\n\nKies de winkels die je volgt en de woorden waarop je aanbiedingen wilt zoeken. Je kunt beide later aanpassen.",
+        "title": "Folders"
+      }
+    }
+  },
+  "entity": {
+    "event": {
+      "folders": {
+        "name": "Folders",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "new_folder": "Nieuwe folder",
+              "new_offer": "Nieuwe aanbieding"
+            }
+          },
+          "folder": {
+            "name": "Folder"
+          },
+          "price": {
+            "name": "Prijs"
+          },
+          "sale_price": {
+            "name": "Actieprijs"
+          },
+          "store": {
+            "name": "Winkel"
+          },
+          "title": {
+            "name": "Titel"
+          },
+          "url": {
+            "name": "Link"
+          },
+          "valid_from": {
+            "name": "Geldig vanaf"
+          },
+          "valid_until": {
+            "name": "Geldig tot"
+          },
+          "word": {
+            "name": "Zoekwoord"
+          }
+        }
+      }
+    },
+    "image": {
+      "folder": {
+        "name": "Folder",
+        "state_attributes": {
+          "folder": {
+            "name": "Folder"
+          },
+          "other_folders": {
+            "name": "Andere folders"
+          },
+          "store": {
+            "name": "Winkel"
+          },
+          "store_url": {
+            "name": "Winkelpagina"
+          },
+          "upcoming": {
+            "name": "Binnenkort"
+          },
+          "url": {
+            "name": "Folderpagina"
+          },
+          "valid_from": {
+            "name": "Geldig vanaf"
+          },
+          "valid_until": {
+            "name": "Geldig tot"
+          }
+        }
+      }
+    },
+    "sensor": {
+      "offers": {
+        "name": "Aanbiedingen",
+        "state_attributes": {
+          "offers": {
+            "name": "Aanbiedingen"
+          },
+          "words": {
+            "name": "Zoekwoorden"
+          }
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "update_failed": {
+      "message": "Kan de folders niet bijwerken: {error}"
+    }
+  },
+  "options": {
+    "error": {
+      "cannot_connect": "Kan folders.nl niet bereiken. Probeer het later opnieuw.",
+      "too_many_stores": "Kies hoogstens 60 winkels.",
+      "words": "Gebruik hoogstens 10 zoekwoorden van 2 tot 40 tekens, gescheiden door komma's."
+    },
+    "step": {
+      "init": {
+        "data": {
+          "stores": "Winkels",
+          "words": "Zoekwoorden"
+        },
+        "data_description": {
+          "stores": "Elke winkel die je volgt krijgt een afbeeldingsentiteit met de huidige folder. Hoogstens 60 winkels.",
+          "words": "Hoogstens 10 woorden, gescheiden door komma's, bijvoorbeeld koffie, kaas. Aanbiedingen die bij een woord passen, van winkels die je volgt, verschijnen in de sensor Aanbiedingen."
+        },
+        "description": "Kies de winkels die je volgt en de woorden waarop je aanbiedingen wilt zoeken.",
+        "title": "Opties voor Folders"
+      }
+    }
+  }
+}

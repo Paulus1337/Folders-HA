@@ -1,0 +1,19 @@
+title: Folders
+views:
+  - title: Folders
+    path: folders
+    icon: mdi:newspaper-variant-multiple
+    type: sections
+    max_columns: 4
+    sections:
+      - type: grid
+        column_span: 4
+        cards:
+          - type: custom:folders-card
+  - title: Map
+    path: map
+    icon: mdi:map-marker-radius
+    type: panel
+    cards:
+      - type: custom:folders-card
+        view: map

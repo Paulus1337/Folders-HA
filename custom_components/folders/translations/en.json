@@ -1,0 +1,135 @@
+{
+  "config": {
+    "error": {
+      "cannot_connect": "Could not reach folders.nl. Try again later.",
+      "too_many_stores": "Choose at most 60 stores.",
+      "words": "Use at most 10 watch words of 2 to 40 characters each, separated by commas."
+    },
+    "step": {
+      "user": {
+        "data": {
+          "stores": "Stores",
+          "words": "Watch words"
+        },
+        "data_description": {
+          "stores": "Each store you follow gets an image entity with its current folder. At most 60 stores.",
+          "words": "Up to 10 words, separated by commas, for example koffie, kaas. Offers of the stores you follow that match a word show up in the Offers sensor."
+        },
+        "description": "Folders-HA is an unofficial open-source hobby project. It is not made, endorsed or supported by folders.nl or any store.\n\nChoose the stores you follow and the words to watch for in their offers. You can change both later.",
+        "title": "Folders"
+      }
+    }
+  },
+  "entity": {
+    "event": {
+      "folders": {
+        "name": "Folders",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "new_folder": "New folder",
+              "new_offer": "New offer"
+            }
+          },
+          "folder": {
+            "name": "Folder"
+          },
+          "price": {
+            "name": "Price"
+          },
+          "sale_price": {
+            "name": "Sale price"
+          },
+          "store": {
+            "name": "Store"
+          },
+          "title": {
+            "name": "Title"
+          },
+          "url": {
+            "name": "Link"
+          },
+          "valid_from": {
+            "name": "Valid from"
+          },
+          "valid_until": {
+            "name": "Valid until"
+          },
+          "word": {
+            "name": "Watch word"
+          }
+        }
+      }
+    },
+    "image": {
+      "folder": {
+        "name": "Folder",
+        "state_attributes": {
+          "folder": {
+            "name": "Folder"
+          },
+          "other_folders": {
+            "name": "Other folders"
+          },
+          "store": {
+            "name": "Store"
+          },
+          "store_url": {
+            "name": "Store page"
+          },
+          "upcoming": {
+            "name": "Upcoming"
+          },
+          "url": {
+            "name": "Folder page"
+          },
+          "valid_from": {
+            "name": "Valid from"
+          },
+          "valid_until": {
+            "name": "Valid until"
+          }
+        }
+      }
+    },
+    "sensor": {
+      "offers": {
+        "name": "Offers",
+        "state_attributes": {
+          "offers": {
+            "name": "Offers"
+          },
+          "words": {
+            "name": "Watch words"
+          }
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "update_failed": {
+      "message": "Could not update the folders: {error}"
+    }
+  },
+  "options": {
+    "error": {
+      "cannot_connect": "Could not reach folders.nl. Try again later.",
+      "too_many_stores": "Choose at most 60 stores.",
+      "words": "Use at most 10 watch words of 2 to 40 characters each, separated by commas."
+    },
+    "step": {
+      "init": {
+        "data": {
+          "stores": "Stores",
+          "words": "Watch words"
+        },
+        "data_description": {
+          "stores": "Each store you follow gets an image entity with its current folder. At most 60 stores.",
+          "words": "Up to 10 words, separated by commas, for example koffie, kaas. Offers of the stores you follow that match a word show up in the Offers sensor."
+        },
+        "description": "Choose the stores you follow and the words to watch for in their offers.",
+        "title": "Folders options"
+      }
+    }
+  }
+}

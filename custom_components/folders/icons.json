@@ -1,0 +1,23 @@
+{
+  "entity": {
+    "event": {
+      "folders": {
+        "default": "mdi:newspaper-variant-multiple"
+      }
+    },
+    "image": {
+      "folder": {
+        "default": "mdi:newspaper-variant"
+      }
+    },
+    "sensor": {
+      "offers": {
+        "default": "mdi:tag-multiple",
+        "range": {
+          "0": "mdi:tag-outline",
+          "1": "mdi:tag-multiple"
+        }
+      }
+    }
+  }
+}

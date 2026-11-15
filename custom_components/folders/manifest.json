@@ -1,0 +1,14 @@
+{
+  "domain": "folders",
+  "name": "Folders",
+  "codeowners": ["@Paulus1337"],
+  "config_flow": true,
+  "dependencies": ["frontend", "http", "websocket_api"],
+  "documentation": "https://github.com/Paulus1337/Folders-HA",
+  "integration_type": "service",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/Paulus1337/Folders-HA/issues",
+  "requirements": [],
+  "single_config_entry": true,
+  "version": "0.1.0"
+}
