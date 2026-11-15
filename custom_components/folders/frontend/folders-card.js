@@ -446,11 +446,15 @@ class FoldersCard extends HTMLElement {
   }
 }
 
-if (!customElements.get("folders-card")) {
+const register = () => {
+  if (customElements.get("folders-card")) return;
   customElements.define("folders-card", FoldersCard);
   (window.customCards = window.customCards || []).push({
     type: "folders-card",
     name: "Folders",
     description: "The current folders and offers of the stores you follow, or a map of the shops in view.",
   });
-}
+};
+
+if (customElements.get("home-assistant")) register();
+else customElements.whenDefined("home-assistant").then(register);
