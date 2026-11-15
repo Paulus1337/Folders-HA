@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta
+from operator import attrgetter
 from typing import Any
 
 from homeassistant.components.event import EventEntity
@@ -8,13 +10,46 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
 
-from .const import EVENT_NEW_FOLDER, EVENT_NEW_OFFER
-from .coordinator import FoldersConfigEntry, FoldersCoordinator
+from .api import Folder, Offer
+from .const import EVENT_NEW_FOLDER, EVENT_NEW_MENTION, EVENT_NEW_OFFER
+from .coordinator import FoldersConfigEntry, FoldersCoordinator, FoldersData
 from .entity import FoldersEntity, period
 
 PARALLEL_UPDATES = 0
+FRESH = timedelta(days=3)
+OLD = datetime.min.replace(tzinfo=UTC)
+_START = attrgetter("valid_from")
+_RATIO = attrgetter("ratio")
 
-type Item = tuple[datetime, datetime, dict[str, Any]]
+type Key = tuple[Any, ...]
+
+
+def _folder(data: FoldersData, folder: Folder) -> dict[str, Any]:
+    return {
+        "store": data.stores[folder.store_id].name,
+        "folder": folder.name or None,
+        **period(folder),
+        "folder_id": folder.folder_id,
+    }
+
+
+def _offer(data: FoldersData, offer: Offer, count: int) -> dict[str, Any]:
+    return {
+        "store": data.stores[offer.store_id].name,
+        "title": offer.title,
+        "price": offer.price,
+        "sale_price": offer.sale_price,
+        "description": offer.description,
+        "word": offer.word,
+        "url": offer.url,
+        "folder_id": offer.folder_id,
+        "page": offer.page,
+        "new_offers": count,
+    }
+
+
+def _mention(data: FoldersData, word: str, folder: Folder, pages: tuple[int, ...], count: int) -> dict[str, Any]:
+    return {**_folder(data, folder), "word": word, "page": pages[0], "new_mentions": count}
 
 
 async def async_setup_entry(
@@ -28,40 +63,71 @@ class FoldersEvent(FoldersEntity, EventEntity):
 
     def __init__(self, coordinator: FoldersCoordinator) -> None:
         super().__init__(coordinator, "folders")
-        self._attr_event_types = [EVENT_NEW_FOLDER, EVENT_NEW_OFFER]
-        self._seen = {key: item[1] for key, item in self._items().items()}
+        self._attr_event_types = [EVENT_NEW_FOLDER, EVENT_NEW_OFFER, EVENT_NEW_MENTION]
+        self._seen: dict[Key, datetime] = {}
+        self._appeared = dict.fromkeys(coordinator.data.index, OLD)
+        self._words = self._searched()
+        self._news()
 
     @property
     def available(self) -> bool:
         return True
 
-    def _items(self) -> dict[tuple[str, str], Item]:
+    def _searched(self) -> dict[str, set[str]]:
         data = self.coordinator.data
-        items: dict[tuple[str, str], Item] = {}
-        for store_id in self.coordinator.followed:
-            for folder in data.folders.get(store_id, []):
-                attributes = {"store": data.stores[store_id].name, "folder": folder.name or None, **period(folder)}
-                items[EVENT_NEW_FOLDER, folder.folder_id] = (folder.valid_from, folder.valid_until, attributes)
+        return {EVENT_NEW_OFFER: set(data.words), EVENT_NEW_MENTION: set(data.mentions)}
+
+    def _new(self, until: datetime, now: datetime, *keys: Key) -> bool:
+        new = until > now and self._seen.keys().isdisjoint(keys)
+        for key in keys:
+            self._seen.setdefault(key, until)
+        return new
+
+    def _news(self) -> list[tuple[str, dict[str, Any]]]:
+        now, data, words = dt_util.utcnow(), self.coordinator.data, self._words
+        fresh, self._words = now - FRESH, self._searched()
+        self._seen = {key: until for key, until in self._seen.items() if until > now}
+        self._appeared = {folder_id: self._appeared.get(folder_id, now) for folder_id in data.index}
+        folders = (folder for store_id in sorted(data.followed) for folder in data.folders.get(store_id, []))
+        news = [
+            (EVENT_NEW_FOLDER, _folder(data, folder))
+            for folder in sorted(folders, key=_START)
+            if self._new(folder.valid_until, now, (EVENT_NEW_FOLDER, folder.folder_id))
+        ]
+        known = {
+            word: {key for offer in data.matches[word] for key in offer.identity}
+            for word in data.words
+            if word in words[EVENT_NEW_OFFER]
+        }
+        offers: dict[str, list[Offer]] = {}
         for offer in data.offers:
-            attributes = {
-                "store": data.stores[offer.store_id].name,
-                "title": offer.title,
-                "price": offer.price,
-                "sale_price": offer.sale_price,
-                "word": offer.word,
-                "url": offer.url,
-            }
-            items[EVENT_NEW_OFFER, offer.offer_id] = (offer.valid_from, offer.valid_until, attributes)
-        return items
+            word = next((word for word, keys in known.items() if not keys.isdisjoint(offer.identity)), None)
+            if (
+                self._new(offer.valid_until, now, *((EVENT_NEW_OFFER, key) for key in offer.identity))
+                and word
+                and max(offer.valid_from, self._appeared[offer.folder_id]) > fresh
+            ):
+                offers.setdefault(word, []).append(replace(offer, word=word))
+        for word in data.words:
+            for folder_id in data.index.keys() & data.offered[word]:
+                self._seen.setdefault((EVENT_NEW_MENTION, word, folder_id), data.index[folder_id].valid_until)
+            hits = [
+                (folder, pages)
+                for folder, pages in data.mentions.get(word, [])
+                if self._new(folder.valid_until, now, (EVENT_NEW_MENTION, word, folder.folder_id))
+                and self._appeared[folder.folder_id] > fresh
+            ]
+            if word in offers:
+                news.append((EVENT_NEW_OFFER, _offer(data, min(offers[word], key=_RATIO), len(offers[word]))))
+            if hits and word in words[EVENT_NEW_MENTION]:
+                news.append((EVENT_NEW_MENTION, _mention(data, word, *hits[0], len(hits))))
+        return news
 
     @callback
     def _handle_coordinator_update(self) -> None:
-        now = dt_util.utcnow()
-        self._seen = {key: until for key, until in self._seen.items() if until > now}
-        new = [(key, item) for key, item in self._items().items() if key not in self._seen and item[1] > now]
-        for key, (_start, until, attributes) in sorted(new, key=lambda pair: pair[1][0]):
-            self._seen[key] = until
-            self._trigger_event(key[0], attributes)
+        news = self._news()
+        for kind, attributes in news:
+            self._trigger_event(kind, attributes)
             self.async_write_ha_state()
-        if not new:
+        if not news:
             super()._handle_coordinator_update()

@@ -6,9 +6,9 @@ from homeassistant.components.sensor import SensorEntity
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
-from .const import OFFER_LIMIT
+from .const import DEAL_LIMIT, OFFER_LIMIT
 from .coordinator import FoldersConfigEntry, FoldersCoordinator
-from .entity import FoldersEntity
+from .entity import FoldersEntity, offer_attributes
 
 PARALLEL_UPDATES = 0
 
@@ -16,7 +16,7 @@ PARALLEL_UPDATES = 0
 async def async_setup_entry(
     hass: HomeAssistant, entry: FoldersConfigEntry, async_add_entities: AddConfigEntryEntitiesCallback
 ) -> None:
-    async_add_entities([FoldersOffers(entry.runtime_data)])
+    async_add_entities([FoldersOffers(entry.runtime_data), FoldersDeals(entry.runtime_data)])
 
 
 class FoldersOffers(FoldersEntity, SensorEntity):
@@ -34,17 +34,26 @@ class FoldersOffers(FoldersEntity, SensorEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         data = self.coordinator.data
         return {
-            "words": self.coordinator.words,
+            "words": list(data.words),
             "offers": [
-                {
-                    "store": data.stores[offer.store_id].name,
-                    "title": offer.title,
-                    "price": offer.price,
-                    "sale_price": offer.sale_price,
-                    "valid_until": offer.valid_until.isoformat(),
-                    "url": offer.url,
-                    "page": offer.page,
-                }
+                {**offer_attributes(data, offer), "description": offer.description}
                 for offer in data.offers[:OFFER_LIMIT]
             ],
         }
+
+
+class FoldersDeals(FoldersEntity, SensorEntity):
+    _attr_translation_key = "best_deals"
+    _unrecorded_attributes = frozenset({"deals"})
+
+    def __init__(self, coordinator: FoldersCoordinator) -> None:
+        super().__init__(coordinator, "best_deals")
+
+    @property
+    def native_value(self) -> int:
+        return len(self.coordinator.data.deals)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        data = self.coordinator.data
+        return {"deals": [offer_attributes(data, offer) for offer in data.deals[:DEAL_LIMIT]]}

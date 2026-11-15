@@ -1,0 +1,39 @@
+search:
+  fields:
+    query:
+      required: true
+      example: koffie
+      selector:
+        text:
+    scope:
+      default: all
+      selector:
+        select:
+          translation_key: scope
+          options:
+            - all
+            - followed
+    limit:
+      default: 10
+      selector:
+        number:
+          min: 1
+          max: 60
+          mode: box
+best_deals:
+  fields:
+    limit:
+      default: 10
+      selector:
+        number:
+          min: 1
+          max: 30
+          mode: box
+    category:
+      example: supermarkt
+      selector:
+        text:
+    theme:
+      example: black-friday
+      selector:
+        text:

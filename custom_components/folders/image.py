@@ -10,6 +10,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
 
 from .api import Folder, Store, async_get_image
+from .const import OTHER_FOLDERS
 from .coordinator import FoldersConfigEntry, FoldersCoordinator
 from .entity import FoldersEntity, period
 
@@ -22,15 +23,25 @@ async def async_setup_entry(
 ) -> None:
     coordinator = entry.runtime_data
     registry = er.async_get(hass)
+    registered: set[str] = set()
     for item in er.async_entries_for_config_entry(registry, entry.entry_id):
-        if item.domain == "image" and item.unique_id.removeprefix(f"{entry.entry_id}_") not in coordinator.followed:
-            registry.async_remove(item.entity_id)
+        if item.domain == "image":
+            if (store_id := item.unique_id.removeprefix(f"{entry.entry_id}_")) in coordinator.data.followed:
+                registered.add(store_id)
+            else:
+                registry.async_remove(item.entity_id)
     known: set[str] = set()
 
     @callback
     def async_add_stores() -> None:
-        stores = coordinator.data.stores
-        new = [stores[store_id] for store_id in coordinator.followed if store_id in stores and store_id not in known]
+        data = coordinator.data
+        new = [
+            store
+            for store_id, store in data.stores.items()
+            if store_id in data.followed
+            and (store_id in data.folders or store_id in registered)
+            and store_id not in known
+        ]
         known.update(store.store_id for store in new)
         if new:
             async_add_entities(FoldersImage(coordinator, store) for store in new)
@@ -87,5 +98,5 @@ class FoldersImage(FoldersEntity, ImageEntity):
             **period(folder),
             "upcoming": folder.valid_from > dt_util.utcnow(),
             "store_url": store.url,
-            "other_folders": [{"name": item.name or None, **period(item)} for item in folders[1:]],
+            "other_folders": [{"name": item.name or None, **period(item)} for item in folders[1 : 1 + OTHER_FOLDERS]],
         }

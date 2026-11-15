@@ -1,0 +1,99 @@
+blueprint:
+  name: "Folders: notify me"
+  description: >-
+    Sends a notification to your phone for new offers on the Folders watch list, for folders that mention a word of
+    the watch list and for new folders of the stores you follow. Selecting the notification opens the folder in Home
+    Assistant, at the page of the offer or the mention.
+  domain: automation
+  source_url: https://github.com/Paulus1337/Folders-HA/blob/main/blueprints/automation/folders/notify.yaml
+  homeassistant:
+    min_version: 2025.8.0
+  input:
+    event_entity:
+      name: Folders event entity
+      description: The event entity of Folders, usually event.folders_folders.
+      selector:
+        entity:
+          filter:
+            - integration: folders
+              domain: event
+    phone:
+      name: Phone
+      description: The phone with the Home Assistant app that gets the notifications.
+      selector:
+        device:
+          filter:
+            - integration: mobile_app
+    what:
+      name: What
+      description: >-
+        What you want a notification for. With every store followed, folders.nl brings about 100 new folders a week.
+      default:
+        - new_offer
+      selector:
+        select:
+          multiple: true
+          options:
+            - label: New offers on the watch list
+              value: new_offer
+            - label: Folders that mention a watch word
+              value: new_mention
+            - label: New folders of the stores you follow
+              value: new_folder
+    words:
+      name: Only these words
+      description: >-
+        Only send new offers and mentions for these words of the watch list, separated by commas, for example koffie,
+        kaas. Leave empty for every word.
+      default: ""
+      selector:
+        text:
+    stores:
+      name: Only these stores
+      description: >-
+        Only send new folders of these stores, separated by commas, for example Albert Heijn, Jumbo. Leave empty for
+        every store you follow.
+      default: ""
+      selector:
+        text:
+    dashboard:
+      name: Dashboard path
+      description: The path of the dashboard view with the Folders card, where the notification opens the folder.
+      default: /dashboard-folders/folders
+      selector:
+        text:
+
+mode: queued
+max: 50
+max_exceeded: silent
+
+triggers:
+  - trigger: state
+    entity_id: !input event_entity
+
+variables:
+  what: !input what
+  words: !input words
+  stores: !input stores
+  dashboard: !input dashboard
+  wanted: "{{ (words or '').lower().split(',') | map('regex_replace', ' +', ' ') | map('trim') | reject('eq', '') | list }}"
+  chosen: "{{ (stores or '').lower().split(',') | map('regex_replace', ' +', ' ') | map('trim') | reject('eq', '') | list }}"
+  info: "{{ trigger.to_state.attributes if trigger.to_state else {} }}"
+
+conditions:
+  - "{{ trigger.from_state is not none and trigger.to_state is not none and 'unavailable' not in (trigger.from_state.state, trigger.to_state.state) }}"
+  - "{{ trigger.from_state.state != trigger.to_state.state or (trigger.from_state.attributes.items() | rejectattr('0', 'in', ['friendly_name', 'icon', 'entity_picture']) | list) != (trigger.to_state.attributes.items() | rejectattr('0', 'in', ['friendly_name', 'icon', 'entity_picture']) | list) }}"
+  - "{{ info.event_type in what }}"
+  - "{{ info.event_type not in ['new_offer', 'new_mention'] or wanted | count == 0 or info.word in wanted }}"
+  - "{{ info.event_type != 'new_folder' or chosen | count == 0 or (info.store or '') | lower | regex_replace(' +', ' ') | trim in chosen }}"
+
+actions:
+  - device_id: !input phone
+    domain: mobile_app
+    type: notify
+    title: "{{ 'New offer' if info.event_type == 'new_offer' else 'New folder' if info.event_type == 'new_folder' else 'New mention' }}: {{ info.store }}"
+    message: >-
+      {% if info.event_type == 'new_offer' %}{{ info.title }}{% if info.sale_price %}, {{ '%.2f' | format(info.sale_price) }}{% if info.price and info.price != info.sale_price %} (was {{ '%.2f' | format(info.price) }}){% endif %}{% elif info.price %}, {{ '%.2f' | format(info.price) }}{% endif %}{% if info.new_offers > 1 %} and {{ info.new_offers - 1 }} more{% endif %}{% elif info.event_type == 'new_mention' %}{{ info.word }} on page {{ info.page }} of {{ info.folder or 'the folder' }}{% if info.new_mentions > 1 %} and {{ info.new_mentions - 1 }} more{% endif %}{% else %}{{ info.folder or 'Folder' }}, from {{ as_timestamp(info.valid_from) | timestamp_custom('%a %-d %b') }}{% endif %}
+    data:
+      url: "{{ dashboard }}?folders_folder={{ info.folder_id }}&folders_page={{ info.get('page') or 1 }}{{ '&folders_query=' ~ (info.word | urlencode) if info.event_type == 'new_mention' else '' }}"
+      clickAction: "{{ dashboard }}?folders_folder={{ info.folder_id }}&folders_page={{ info.get('page') or 1 }}{{ '&folders_query=' ~ (info.word | urlencode) if info.event_type == 'new_mention' else '' }}"

@@ -7,9 +7,20 @@ views:
     max_columns: 4
     sections:
       - type: grid
-        column_span: 4
+        column_span: 3
         cards:
           - type: custom:folders-card
+      - type: grid
+        column_span: 1
+        cards:
+          - type: todo-list
+            title: Watch list
+            entity: todo.folders_watch_list
+          - type: calendar
+            title: Folders
+            initial_view: listWeek
+            entities:
+              - calendar.folders_folders
   - title: Map
     path: map
     icon: mdi:map-marker-radius

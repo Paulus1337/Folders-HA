@@ -1,5 +1,10 @@
 {
   "entity": {
+    "calendar": {
+      "folders": {
+        "default": "mdi:calendar-month"
+      }
+    },
     "event": {
       "folders": {
         "default": "mdi:newspaper-variant-multiple"
@@ -11,6 +16,13 @@
       }
     },
     "sensor": {
+      "best_deals": {
+        "default": "mdi:sale",
+        "range": {
+          "0": "mdi:sale-outline",
+          "1": "mdi:sale"
+        }
+      },
       "offers": {
         "default": "mdi:tag-multiple",
         "range": {
@@ -18,6 +30,19 @@
           "1": "mdi:tag-multiple"
         }
       }
+    },
+    "todo": {
+      "watch_list": {
+        "default": "mdi:tag-search"
+      }
+    }
+  },
+  "services": {
+    "best_deals": {
+      "service": "mdi:sale"
+    },
+    "search": {
+      "service": "mdi:magnify"
     }
   }
 }

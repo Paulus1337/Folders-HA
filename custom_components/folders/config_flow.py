@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from contextlib import suppress
 from typing import Any
 
@@ -14,33 +14,62 @@ from homeassistant.config_entries import (
 from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
+    BooleanSelector,
     SelectOptionDict,
     SelectSelector,
     SelectSelectorConfig,
     SelectSelectorMode,
-    TextSelector,
 )
 import voluptuous as vol
 
-from .api import FoldersClient, FoldersError, Store
-from .const import CONF_STORES, CONF_WORDS, DOMAIN, MAX_STORES, MAX_WORDS, NAME
+from .api import Category, FoldersClient, FoldersError, Store
+from .const import (
+    CONF_ALWAYS_STORES,
+    CONF_EXCLUDED_CATEGORIES,
+    CONF_EXCLUDED_STORES,
+    CONF_EXCLUDED_THEMES,
+    CONF_WATCH_ALL,
+    DOMAIN,
+    NAME,
+    OTHER,
+)
 from .coordinator import FoldersConfigEntry
 
+type Catalog = tuple[dict[str, Store], dict[str, Category], dict[str, Category]]
+LISTS = (CONF_EXCLUDED_CATEGORIES, CONF_EXCLUDED_STORES, CONF_ALWAYS_STORES, CONF_EXCLUDED_THEMES)
 
-def _schema(stores: dict[str, Store]) -> vol.Schema:
-    options = [
-        SelectOptionDict(value=store.store_id, label=store.name)
-        for store in sorted(stores.values(), key=lambda store: store.name.casefold())
+
+def _choices(items: Iterable[tuple[str, str]]) -> list[SelectOptionDict]:
+    return [
+        SelectOptionDict(value=value, label=label)
+        for value, label in sorted(items, key=lambda item: item[1].casefold())
     ]
-    choice = SelectSelector(SelectSelectorConfig(options=options, multiple=True, mode=SelectSelectorMode.DROPDOWN))
-    return vol.Schema(
-        {vol.Optional(CONF_STORES, default=[]): choice, vol.Optional(CONF_WORDS, default=""): TextSelector()}
+
+
+def _select(options: list[SelectOptionDict], **config: Any) -> SelectSelector:
+    return SelectSelector(
+        SelectSelectorConfig(options=options, multiple=True, mode=SelectSelectorMode.DROPDOWN, **config)
     )
 
 
-def _words(text: str) -> list[str] | None:
-    words = list(dict.fromkeys(word for part in text.split(",") if (word := " ".join(part.split()).lower())))
-    return words if len(words) <= MAX_WORDS and all(2 <= len(word) <= 40 for word in words) else None
+def _schema(catalog: Catalog, options_flow: bool) -> vol.Schema:
+    stores, categories, themes = catalog
+    labels = [
+        *_choices((category.slug, category.name) for category in categories.values()),
+        SelectOptionDict(value=OTHER, label="Other"),
+    ]
+    names = _choices((store.store_id, store.name) for store in stores.values())
+    schema: dict[Any, Any] = {
+        vol.Optional(CONF_EXCLUDED_CATEGORIES, default=[]): _select(labels, translation_key="categories"),
+        vol.Optional(CONF_EXCLUDED_STORES, default=[]): _select(names),
+        vol.Optional(CONF_ALWAYS_STORES, default=[]): _select(names),
+        vol.Optional(CONF_EXCLUDED_THEMES, default=[]): _select(
+            _choices((theme.slug, theme.name) for theme in themes.values())
+        ),
+    }
+    if options_flow:
+        schema[vol.Optional(CONF_WATCH_ALL, default=False)] = BooleanSelector()
+    return vol.Schema(schema)
 
 
 async def _async_step(
@@ -50,35 +79,40 @@ async def _async_step(
     current: Mapping[str, Any],
     finish: Callable[[dict[str, Any]], ConfigFlowResult],
 ) -> ConfigFlowResult:
-    if flow.stores is None:
+    if flow.catalog is None:
         with suppress(FoldersError):
-            flow.stores = await FoldersClient(async_get_clientsession(flow.hass)).async_get_stores()
-        if flow.stores is None:
+            client = FoldersClient(async_get_clientsession(flow.hass))
+            stores = await client.async_get_stores()
+            flow.catalog = (stores, await client.async_get_categories(), await client.async_get_themes())
+        if flow.catalog is None:
             return flow.async_show_form(step_id=step_id, errors={"base": "cannot_connect"})
         user_input = None
-    errors: dict[str, str] = {}
+    errors: dict[str, str] | None = None
     if user_input is not None:
-        stores = list(dict.fromkeys(user_input.get(CONF_STORES, [])))
-        words = _words(user_input.get(CONF_WORDS, ""))
-        if len(stores) > MAX_STORES:
-            errors[CONF_STORES] = "too_many_stores"
-        if words is None:
-            errors[CONF_WORDS] = "words"
-        if not errors:
-            return finish({CONF_STORES: stores, CONF_WORDS: words})
-    suggested = user_input or {
-        CONF_STORES: [store_id for store_id in current.get(CONF_STORES, []) if store_id in flow.stores],
-        CONF_WORDS: ", ".join(current.get(CONF_WORDS, [])),
+        chosen = {key: list(dict.fromkeys(user_input.get(key, []))) for key in LISTS}
+        options = {**chosen, CONF_WATCH_ALL: user_input.get(CONF_WATCH_ALL, False)}
+        if set(chosen[CONF_ALWAYS_STORES]).isdisjoint(chosen[CONF_EXCLUDED_STORES]):
+            return finish(options)
+        current, errors = options, {CONF_ALWAYS_STORES: "always_excluded"}
+    stores, categories, themes = flow.catalog
+    known = {
+        CONF_EXCLUDED_CATEGORIES: {*categories, OTHER},
+        CONF_EXCLUDED_STORES: stores,
+        CONF_ALWAYS_STORES: stores,
+        CONF_EXCLUDED_THEMES: themes,
     }
-    schema = flow.add_suggested_values_to_schema(_schema(flow.stores), suggested)
+    suggested = {key: [value for value in current.get(key, []) if value in known[key]] for key in LISTS}
+    schema = _schema(flow.catalog, step_id == "init")
+    schema = flow.add_suggested_values_to_schema(schema, {**suggested, CONF_WATCH_ALL: current.get(CONF_WATCH_ALL)})
     return flow.async_show_form(step_id=step_id, data_schema=schema, errors=errors)
 
 
 class FoldersConfigFlow(ConfigFlow, domain=DOMAIN):
     VERSION = 1
+    MINOR_VERSION = 2
 
     def __init__(self) -> None:
-        self.stores: dict[str, Store] | None = None
+        self.catalog: Catalog | None = None
 
     @staticmethod
     @callback
@@ -93,12 +127,13 @@ class FoldersConfigFlow(ConfigFlow, domain=DOMAIN):
 
 class FoldersOptionsFlow(OptionsFlowWithReload):
     def __init__(self) -> None:
-        self.stores: dict[str, Store] | None = None
+        self.catalog: Catalog | None = None
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         entry: FoldersConfigEntry = self.config_entry
-        if self.stores is None and entry.state is ConfigEntryState.LOADED:
-            self.stores = entry.runtime_data.data.stores
+        if self.catalog is None and entry.state is ConfigEntryState.LOADED:
+            data = entry.runtime_data.data
+            self.catalog = (data.stores, data.categories, data.themes)
         return await _async_step(
             self, "init", user_input, entry.options, lambda options: self.async_create_entry(data=options)
         )

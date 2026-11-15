@@ -1,38 +1,65 @@
 {
   "config": {
+    "abort": {
+      "single_instance_allowed": "Folders is al ingesteld. Kies Configureren bij Folders om het aan te passen."
+    },
     "error": {
-      "cannot_connect": "Kan folders.nl niet bereiken. Probeer het later opnieuw.",
-      "too_many_stores": "Kies hoogstens 60 winkels.",
-      "words": "Gebruik hoogstens 10 zoekwoorden van 2 tot 40 tekens, gescheiden door komma's."
+      "always_excluded": "Een winkel kan niet tegelijk weggelaten en altijd gevolgd worden.",
+      "cannot_connect": "Kan folders.nl niet bereiken. Probeer het later opnieuw."
     },
     "step": {
       "user": {
         "data": {
-          "stores": "Winkels",
-          "words": "Zoekwoorden"
+          "always_stores": "Deze winkels altijd volgen",
+          "excluded_categories": "Categorieen weglaten",
+          "excluded_stores": "Winkels weglaten",
+          "excluded_themes": "Thema's weglaten"
         },
         "data_description": {
-          "stores": "Elke winkel die je volgt krijgt een afbeeldingsentiteit met de huidige folder. Hoogstens 60 winkels.",
-          "words": "Hoogstens 10 woorden, gescheiden door komma's, bijvoorbeeld koffie, kaas. Aanbiedingen die bij een woord passen, van winkels die je volgt, verschijnen in de sensor Aanbiedingen."
+          "always_stores": "Winkels die je volgt, ook als al hun categorieen zijn weggelaten.",
+          "excluded_categories": "Winkels waarvan alle categorieen zijn weggelaten, volg je niet. Overige winkels zijn de winkels zonder categorie.",
+          "excluded_stores": "Winkels die je nooit volgt.",
+          "excluded_themes": "Folders met een van deze thema's worden overal weggelaten."
         },
-        "description": "Folders-HA is een onofficieel open-source hobbyproject. Het is niet gemaakt, goedgekeurd of ondersteund door folders.nl of een winkel.\n\nKies de winkels die je volgt en de woorden waarop je aanbiedingen wilt zoeken. Je kunt beide later aanpassen.",
+        "description": "Folders-HA is een onofficieel open-source hobbyproject. Het is niet gemaakt, goedgekeurd of ondersteund door folders.nl of een winkel.\n\nFolders volgt elke winkel op folders.nl, ook winkels die later bijkomen. Laat weg wat je niet wilt, of kies Verzenden om ze allemaal te volgen. Je kunt dit later aanpassen, en woorden om op te letten zet je in de Volglijst.",
         "title": "Folders"
       }
     }
   },
   "entity": {
+    "calendar": {
+      "folders": {
+        "name": "Folders"
+      }
+    },
     "event": {
       "folders": {
         "name": "Folders",
         "state_attributes": {
+          "description": {
+            "name": "Omschrijving"
+          },
           "event_type": {
             "state": {
               "new_folder": "Nieuwe folder",
+              "new_mention": "Nieuwe vermelding",
               "new_offer": "Nieuwe aanbieding"
             }
           },
           "folder": {
             "name": "Folder"
+          },
+          "folder_id": {
+            "name": "Folder-ID"
+          },
+          "new_mentions": {
+            "name": "Nieuwe vermeldingen"
+          },
+          "new_offers": {
+            "name": "Nieuwe aanbiedingen"
+          },
+          "page": {
+            "name": "Pagina"
           },
           "price": {
             "name": "Prijs"
@@ -93,6 +120,14 @@
       }
     },
     "sensor": {
+      "best_deals": {
+        "name": "Beste aanbiedingen",
+        "state_attributes": {
+          "deals": {
+            "name": "Aanbiedingen"
+          }
+        }
+      },
       "offers": {
         "name": "Aanbiedingen",
         "state_attributes": {
@@ -104,32 +139,117 @@
           }
         }
       }
+    },
+    "todo": {
+      "watch_list": {
+        "name": "Volglijst"
+      }
     }
   },
   "exceptions": {
+    "duplicate_word": {
+      "message": "Dit woord staat al op de volglijst."
+    },
+    "invalid_word": {
+      "message": "Gebruik een woord van 2 tot 40 tekens."
+    },
+    "item_not_found": {
+      "message": "Dit woord staat niet op de volglijst."
+    },
+    "not_loaded": {
+      "message": "Folders is niet geladen. Kijk bij Folders in Instellingen > Apparaten & diensten."
+    },
+    "too_many_words": {
+      "message": "De volglijst let op hoogstens {limit} woorden tegelijk. Vink eerst een woord af of verwijder er een."
+    },
+    "unavailable": {
+      "message": "Kan folders.nl niet bereiken. Probeer het later opnieuw."
+    },
+    "unknown_category": {
+      "message": "folders.nl heeft geen categorie met deze slug. Gebruik een slug zoals supermarkt."
+    },
+    "unknown_theme": {
+      "message": "folders.nl heeft geen thema met deze slug. Gebruik een slug zoals black-friday."
+    },
     "update_failed": {
       "message": "Kan de folders niet bijwerken: {error}"
     }
   },
   "options": {
     "error": {
-      "cannot_connect": "Kan folders.nl niet bereiken. Probeer het later opnieuw.",
-      "too_many_stores": "Kies hoogstens 60 winkels.",
-      "words": "Gebruik hoogstens 10 zoekwoorden van 2 tot 40 tekens, gescheiden door komma's."
+      "always_excluded": "Een winkel kan niet tegelijk weggelaten en altijd gevolgd worden.",
+      "cannot_connect": "Kan folders.nl niet bereiken. Probeer het later opnieuw."
     },
     "step": {
       "init": {
         "data": {
-          "stores": "Winkels",
-          "words": "Zoekwoorden"
+          "always_stores": "Deze winkels altijd volgen",
+          "excluded_categories": "Categorieen weglaten",
+          "excluded_stores": "Winkels weglaten",
+          "excluded_themes": "Thema's weglaten",
+          "watch_all": "Alle winkels volgen voor de volglijst"
         },
         "data_description": {
-          "stores": "Elke winkel die je volgt krijgt een afbeeldingsentiteit met de huidige folder. Hoogstens 60 winkels.",
-          "words": "Hoogstens 10 woorden, gescheiden door komma's, bijvoorbeeld koffie, kaas. Aanbiedingen die bij een woord passen, van winkels die je volgt, verschijnen in de sensor Aanbiedingen."
+          "always_stores": "Winkels die je volgt, ook als al hun categorieen zijn weggelaten.",
+          "excluded_categories": "Winkels waarvan alle categorieen zijn weggelaten, volg je niet. Overige winkels zijn de winkels zonder categorie.",
+          "excluded_stores": "Winkels die je nooit volgt.",
+          "excluded_themes": "Folders met een van deze thema's worden overal weggelaten.",
+          "watch_all": "Zoek de woorden van de volglijst in alle winkels, ook in de winkels die je niet volgt."
         },
-        "description": "Kies de winkels die je volgt en de woorden waarop je aanbiedingen wilt zoeken.",
+        "description": "Folders volgt elke winkel op folders.nl, ook winkels die later bijkomen, behalve wat je hier weglaat. De woorden om op te letten staan in de Volglijst.",
         "title": "Opties voor Folders"
       }
+    }
+  },
+  "selector": {
+    "categories": {
+      "options": {
+        "other": "Overige winkels"
+      }
+    },
+    "scope": {
+      "options": {
+        "all": "Alle winkels",
+        "followed": "Alleen mijn winkels"
+      }
+    }
+  },
+  "services": {
+    "best_deals": {
+      "description": "Geeft de beste aanbiedingen van de winkels die je volgt, zoals de sensor Beste aanbiedingen ze toont, of de aanbiedingen van een thema.",
+      "fields": {
+        "category": {
+          "description": "Alleen de aanbiedingen van winkels in deze categorie, aangegeven met de slug, bijvoorbeeld supermarkt.",
+          "name": "Categorie"
+        },
+        "limit": {
+          "description": "Het hoogste aantal aanbiedingen.",
+          "name": "Aantal"
+        },
+        "theme": {
+          "description": "In plaats daarvan de aanbiedingen van dit thema, aangegeven met de slug, bijvoorbeeld black-friday.",
+          "name": "Thema"
+        }
+      },
+      "name": "Beste aanbiedingen"
+    },
+    "search": {
+      "description": "Zoekt in de aanbiedingen en de folderpagina's van de huidige en komende folders van folders.nl.",
+      "fields": {
+        "limit": {
+          "description": "Het hoogste aantal resultaten.",
+          "name": "Aantal"
+        },
+        "query": {
+          "description": "Waar je naar zoekt, 2 tot 40 tekens, bijvoorbeeld koffie.",
+          "name": "Zoektekst"
+        },
+        "scope": {
+          "description": "Zoek in alle winkels of alleen in de winkels die je volgt.",
+          "name": "Winkels"
+        }
+      },
+      "name": "Aanbiedingen zoeken"
     }
   }
 }

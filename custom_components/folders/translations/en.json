@@ -1,38 +1,65 @@
 {
   "config": {
+    "abort": {
+      "single_instance_allowed": "Folders is already set up. Select Configure on the Folders entry to change it."
+    },
     "error": {
-      "cannot_connect": "Could not reach folders.nl. Try again later.",
-      "too_many_stores": "Choose at most 60 stores.",
-      "words": "Use at most 10 watch words of 2 to 40 characters each, separated by commas."
+      "always_excluded": "A store cannot be left out and always followed at the same time.",
+      "cannot_connect": "Could not reach folders.nl. Try again later."
     },
     "step": {
       "user": {
         "data": {
-          "stores": "Stores",
-          "words": "Watch words"
+          "always_stores": "Always follow these stores",
+          "excluded_categories": "Leave out categories",
+          "excluded_stores": "Leave out stores",
+          "excluded_themes": "Leave out themes"
         },
         "data_description": {
-          "stores": "Each store you follow gets an image entity with its current folder. At most 60 stores.",
-          "words": "Up to 10 words, separated by commas, for example koffie, kaas. Offers of the stores you follow that match a word show up in the Offers sensor."
+          "always_stores": "Stores you follow even when all their categories are left out.",
+          "excluded_categories": "Stores whose categories are all left out are not followed. Other stores are the stores without a category.",
+          "excluded_stores": "Stores you never follow.",
+          "excluded_themes": "Folders with one of these themes are left out everywhere."
         },
-        "description": "Folders-HA is an unofficial open-source hobby project. It is not made, endorsed or supported by folders.nl or any store.\n\nChoose the stores you follow and the words to watch for in their offers. You can change both later.",
+        "description": "Folders-HA is an unofficial open-source hobby project. It is not made, endorsed or supported by folders.nl or any store.\n\nFolders follows every store on folders.nl, also stores that join later. Leave out what you do not want, or select Submit to follow them all. You can change this later, and add words to watch for in the Watch list.",
         "title": "Folders"
       }
     }
   },
   "entity": {
+    "calendar": {
+      "folders": {
+        "name": "Folders"
+      }
+    },
     "event": {
       "folders": {
         "name": "Folders",
         "state_attributes": {
+          "description": {
+            "name": "Description"
+          },
           "event_type": {
             "state": {
               "new_folder": "New folder",
+              "new_mention": "New mention",
               "new_offer": "New offer"
             }
           },
           "folder": {
             "name": "Folder"
+          },
+          "folder_id": {
+            "name": "Folder ID"
+          },
+          "new_mentions": {
+            "name": "New mentions"
+          },
+          "new_offers": {
+            "name": "New offers"
+          },
+          "page": {
+            "name": "Page"
           },
           "price": {
             "name": "Price"
@@ -93,6 +120,14 @@
       }
     },
     "sensor": {
+      "best_deals": {
+        "name": "Best deals",
+        "state_attributes": {
+          "deals": {
+            "name": "Deals"
+          }
+        }
+      },
       "offers": {
         "name": "Offers",
         "state_attributes": {
@@ -104,32 +139,117 @@
           }
         }
       }
+    },
+    "todo": {
+      "watch_list": {
+        "name": "Watch list"
+      }
     }
   },
   "exceptions": {
+    "duplicate_word": {
+      "message": "This word is already on the watch list."
+    },
+    "invalid_word": {
+      "message": "Use a word of 2 to 40 characters."
+    },
+    "item_not_found": {
+      "message": "This word is not on the watch list."
+    },
+    "not_loaded": {
+      "message": "Folders is not loaded. Check the Folders entry in Settings > Devices & services."
+    },
+    "too_many_words": {
+      "message": "The watch list watches at most {limit} words at a time. Check off or delete a word first."
+    },
+    "unavailable": {
+      "message": "Could not reach folders.nl. Try again later."
+    },
+    "unknown_category": {
+      "message": "folders.nl has no category with this slug. Use a slug such as supermarkt."
+    },
+    "unknown_theme": {
+      "message": "folders.nl has no theme with this slug. Use a slug such as black-friday."
+    },
     "update_failed": {
       "message": "Could not update the folders: {error}"
     }
   },
   "options": {
     "error": {
-      "cannot_connect": "Could not reach folders.nl. Try again later.",
-      "too_many_stores": "Choose at most 60 stores.",
-      "words": "Use at most 10 watch words of 2 to 40 characters each, separated by commas."
+      "always_excluded": "A store cannot be left out and always followed at the same time.",
+      "cannot_connect": "Could not reach folders.nl. Try again later."
     },
     "step": {
       "init": {
         "data": {
-          "stores": "Stores",
-          "words": "Watch words"
+          "always_stores": "Always follow these stores",
+          "excluded_categories": "Leave out categories",
+          "excluded_stores": "Leave out stores",
+          "excluded_themes": "Leave out themes",
+          "watch_all": "Watch all stores"
         },
         "data_description": {
-          "stores": "Each store you follow gets an image entity with its current folder. At most 60 stores.",
-          "words": "Up to 10 words, separated by commas, for example koffie, kaas. Offers of the stores you follow that match a word show up in the Offers sensor."
+          "always_stores": "Stores you follow even when all their categories are left out.",
+          "excluded_categories": "Stores whose categories are all left out are not followed. Other stores are the stores without a category.",
+          "excluded_stores": "Stores you never follow.",
+          "excluded_themes": "Folders with one of these themes are left out everywhere.",
+          "watch_all": "Look for the words of the watch list in all stores, also the ones you do not follow."
         },
-        "description": "Choose the stores you follow and the words to watch for in their offers.",
+        "description": "Folders follows every store on folders.nl, also stores that join later, except what you leave out here. The words to watch for are in the Watch list.",
         "title": "Folders options"
       }
+    }
+  },
+  "selector": {
+    "categories": {
+      "options": {
+        "other": "Other stores"
+      }
+    },
+    "scope": {
+      "options": {
+        "all": "All stores",
+        "followed": "Only my stores"
+      }
+    }
+  },
+  "services": {
+    "best_deals": {
+      "description": "Returns the best deals of the stores you follow, as shown by the Best deals sensor, or the deals of a theme.",
+      "fields": {
+        "category": {
+          "description": "Only the deals of stores in this category, given by its slug, for example supermarkt.",
+          "name": "Category"
+        },
+        "limit": {
+          "description": "The highest number of deals to return.",
+          "name": "Limit"
+        },
+        "theme": {
+          "description": "The deals of this theme instead, given by its slug, for example black-friday.",
+          "name": "Theme"
+        }
+      },
+      "name": "Best deals"
+    },
+    "search": {
+      "description": "Searches the offers and the folder pages of the current and coming folders of folders.nl.",
+      "fields": {
+        "limit": {
+          "description": "The highest number of results to return.",
+          "name": "Limit"
+        },
+        "query": {
+          "description": "What to look for, 2 to 40 characters, for example koffie. Use Dutch product words.",
+          "name": "Search text"
+        },
+        "scope": {
+          "description": "Search all stores or only the stores you follow.",
+          "name": "Stores"
+        }
+      },
+      "name": "Search offers"
     }
   }
 }
