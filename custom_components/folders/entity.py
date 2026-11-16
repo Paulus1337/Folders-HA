@@ -24,12 +24,10 @@ def offer_attributes(data: FoldersData, offer: Offer) -> dict[str, Any]:
         "title": offer.title,
         "price": offer.price,
         "sale_price": offer.sale_price,
-        "label": offer.label,
         "valid_until": offer.valid_until.isoformat(),
         "folder_id": offer.folder_id,
         "page": offer.page,
         "url": offer.url,
-        "description": offer.description,
     }
 
 
@@ -38,7 +36,7 @@ def nearby(near: Near | None) -> dict[str, Any]:
 
 
 def match_attributes(data: FoldersData, offer: Offer) -> dict[str, Any]:
-    return {"limit": offer.limit, **nearby(data.near.get(offer.store_id))}
+    return {"description": offer.description, "limit": offer.limit, **nearby(data.near.get(offer.store_id))}
 
 
 class FoldersEntity(CoordinatorEntity[FoldersCoordinator]):

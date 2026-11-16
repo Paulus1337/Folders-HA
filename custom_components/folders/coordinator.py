@@ -47,15 +47,22 @@ SEARCH_TIME = timedelta(minutes=10)
 SUGGEST_TIMEOUT = 5
 LIVE_ITEMS = 100
 COUNT_ITEMS = 1000
-TEXT_ITEMS = 20
+FOLDER_ITEMS = 20
 CATEGORY_DEALS = 30
 ALL_DEALS = 50
 STORE_DEALS = 10
 THEME_DEALS = 50
 DEAL_STORES = 10
 FOUND_PAGES = 50
+type Fetch[T] = Callable[[], Awaitable[T]]
 _START = attrgetter("valid_from")
 _RATIO = attrgetter("ratio")
+
+
+class Cache(dict[str, tuple[datetime, Any]]):
+    def __init__(self, gate: asyncio.Semaphore) -> None:
+        super().__init__()
+        self.gate = gate
 
 
 def _shown(folders: list[Folder], now: datetime) -> list[Folder]:
@@ -67,8 +74,7 @@ def _shown(folders: list[Folder], now: datetime) -> list[Folder]:
 def _ranked(offers: Iterable[Offer]) -> list[Offer]:
     kept: dict[tuple[Any, ...], Offer] = {}
     for offer in sorted(offers, key=_RATIO):
-        key = offer.store_id, offer.title.casefold(), offer.price, offer.sale_price, (offer.label or "").casefold()
-        kept.setdefault(key, offer)
+        kept.setdefault((offer.store_id, offer.title.casefold(), offer.price, offer.sale_price), offer)
     return list(kept.values())
 
 
@@ -163,13 +169,10 @@ class FoldersCoordinator(DataUpdateCoordinator[FoldersData]):
         self.failing = False
         self._answers: Answers | None = None
         self._doubt: tuple[tuple[str, ...], datetime] | None = None
-        self._folders: dict[str, tuple[datetime, Any]] = {}
-        self._searches: dict[str, tuple[datetime, Any]] = {}
-        self._suggestions: dict[str, tuple[datetime, Any]] = {}
-        self._texts: dict[str, tuple[datetime, Any]] = {}
-        self._themes: dict[str, tuple[datetime, Any]] = {}
-        self._live = asyncio.Semaphore(2)
-        self._counting: dict[str, asyncio.Task[int]] = {}
+        live = asyncio.Semaphore(2)
+        self._folders, self._searches, self._suggestions, self._texts, self._themes = (Cache(live) for _ in range(5))
+        self._offers = Cache(asyncio.Semaphore(1))
+        self._shared: dict[tuple[int, str], asyncio.Task[Any]] = {}
         self._unsub_watch: CALLBACK_TYPE | None = None
         entry.async_on_unload(self._async_cancel_watch)
 
@@ -342,15 +345,10 @@ class FoldersCoordinator(DataUpdateCoordinator[FoldersData]):
         )
 
     async def _async_live[T](
-        self,
-        cache: dict[str, tuple[datetime, Any]],
-        key: str,
-        age: timedelta,
-        fetch: Callable[[], Awaitable[T]],
-        size: int = LIVE_ITEMS,
+        self, cache: Cache, key: str, age: timedelta, fetch: Fetch[T], size: int = LIVE_ITEMS
     ) -> T:
         if (cached := cache.get(key)) is None or dt_util.utcnow() - cached[0] >= age:
-            async with self._live:
+            async with cache.gate:
                 cached = (dt_util.utcnow(), await fetch())
             cache.pop(key, None)
             cache[key] = cached
@@ -369,37 +367,37 @@ class FoldersCoordinator(DataUpdateCoordinator[FoldersData]):
         except TimeoutError:
             raise FoldersError("The suggestions took too long") from None
 
-    async def async_folder(self, folder: Folder) -> int:
-        if (count := self.page_count(folder_id := folder.folder_id)) is not None:
-            return count
-        if (task := self._counting.get(folder_id)) is None:
-            fetch = partial(self.client.async_get_folder, folder)
-            live = self._async_live(self._folders, folder_id, timedelta.max, fetch, COUNT_ITEMS)
-            task = self._counting[folder_id] = self.config_entry.async_create_background_task(self.hass, live, DOMAIN)
-            task.add_done_callback(partial(self._counted, folder_id))
+    async def _async_shared[T](self, cache: Cache, key: str, age: timedelta, fetch: Fetch[T], size: int) -> T:
+        if (cached := cache.get(key)) and dt_util.utcnow() - cached[0] < age:
+            return cached[1]
+        if (task := self._shared.get(slot := (id(cache), key))) is None:
+            live = self._async_live(cache, key, age, fetch, size)
+            task = self._shared[slot] = self.config_entry.async_create_background_task(self.hass, live, DOMAIN)
+            task.add_done_callback(partial(self._shared_done, slot))
         await asyncio.wait((task,))
         if task.cancelled():
             raise FoldersError("Folders was unloaded")
         return task.result()
 
-    def _counted(self, folder_id: str, task: asyncio.Task[int]) -> None:
-        del self._counting[folder_id]
+    def _shared_done(self, slot: tuple[int, str], task: asyncio.Task[Any]) -> None:
+        del self._shared[slot]
         if not task.cancelled():
             task.exception()
 
-    def known_offers(self, folder_id: str) -> list[Offer]:
-        answers = self._answers
-        found = [*(answers.found.values() if answers else ()), *(item for _, item in self._searches.values())]
-        lists = [*(item.offers for item in found), *(item for _, item in self._themes.values())]
-        lists.append(answers.deals if answers else [])
-        return unique(offer for offers in lists for offer in offers if offer.folder_id == folder_id)
+    async def async_folder(self, folder: Folder) -> int:
+        fetch = partial(self.client.async_get_folder, folder)
+        return await self._async_shared(self._folders, folder.folder_id, timedelta.max, fetch, COUNT_ITEMS)
+
+    async def async_folder_offers(self, folder: Folder) -> list[Offer]:
+        fetch = partial(self.client.async_get_folder_offers, folder)
+        return await self._async_shared(self._offers, folder.folder_id, FOLDER_TIME, fetch, FOLDER_ITEMS)
 
     async def async_find(self, folder: Folder, text: str) -> list[int] | None:
         async def fetch() -> tuple[str, ...]:
             texts = await self.client.async_get_text(folder)
             return await self.hass.async_add_executor_job(lambda: tuple(map(plain, texts)))
 
-        pages = await self._async_live(self._texts, folder.folder_id, FOLDER_TIME, fetch, TEXT_ITEMS)
+        pages = await self._async_live(self._texts, folder.folder_id, FOLDER_TIME, fetch, FOLDER_ITEMS)
         if not pages:
             return None
         query = plain(text)

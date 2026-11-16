@@ -1093,11 +1093,19 @@ class FoldersCard extends HTMLElement {
       folder,
       pages,
       thumbs: pages.map((_, index) => this._keep(thumbs[index], at) || ""),
-      offers: list(answer.offers),
+      offers: [],
       at,
     });
     if (!viewer.image) this._frame(viewer);
     this._go(viewer.page, viewer.grid);
+    this._offers(viewer, at);
+  }
+
+  async _offers(viewer, at) {
+    const answer = await this._hass.callWS({ type: "folders/offers", folder_id: viewer.id }).catch(() => null);
+    if (viewer !== this._viewer || at !== viewer.at || answer?.status !== "ok") return;
+    viewer.offers = list(answer.offers);
+    this._here(viewer);
   }
 
   _frame(viewer) {
@@ -1228,14 +1236,15 @@ class FoldersCard extends HTMLElement {
         line("small", String(index + 1)),
       );
     fill(viewer.sheet, ...(grid ? viewer.thumbs.map(thumb) : []));
-    const offers = grid ? [] : viewer.offers.filter((offer) => offer.page === now);
-    const items = offers.map((offer) => this._item(offer, null, viewer.folder.store, viewer.at));
-    fill(
-      viewer.here,
-      items.length && line("heading", t.here),
-      items.length && el("div", { className: "items" }, ...items),
-    );
+    this._here(viewer);
     if (this.shadowRoot.activeElement?.disabled) viewer.root.focus();
+  }
+
+  _here(viewer) {
+    const { t } = this._texts();
+    const offers = viewer.grid ? [] : viewer.offers.filter((offer) => offer.page === viewer.page);
+    const items = offers.map((offer) => this._item(offer, null, viewer.folder.store, viewer.at));
+    fill(viewer.here, ...(items.length ? [line("heading", t.here), el("div", { className: "items" }, ...items)] : []));
   }
 
   _key(ev) {

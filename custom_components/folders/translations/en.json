@@ -58,9 +58,6 @@
           "folder_id": {
             "name": "Folder ID"
           },
-          "label": {
-            "name": "Price label"
-          },
           "limit": {
             "name": "Price limit"
           },

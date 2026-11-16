@@ -53,6 +53,10 @@ FOLDER_QUERY = (
     "query($s: String!, $id: UUID!){ affiliateCmsPublicationVariant(affiliateSlug:$s, publicationVariantId:$id){ "
     "id thumbnailUrls } }"
 )
+FOLDER_OFFERS = "affiliateCmsPublicationVariantPietTaggings"
+FOLDER_OFFERS_QUERY = (
+    f"query($o: InputAffiliateCmsPublicationVariantPietTaggings!){{ {FOLDER_OFFERS}(options:$o){{ {OFFER_FIELDS} }} }}"
+)
 SUGGEST_QUERY = (
     "query($o: InputAffiliateCmsPietTaggingPagination!){ affiliateCmsPietTaggings(options:$o){ items{ data "
     "publicationVariant{ id } } } }"
@@ -234,7 +238,7 @@ class Offer:
 
     @property
     def ratio(self) -> float:
-        return self.sale_price / self.price if self.price and self.sale_price else 1 - _percent(self.label) / 100
+        return self.sale_price / self.price if self.price and self.sale_price else 1.0
 
     @property
     def identity(self) -> tuple[str, tuple[Any, ...]]:
@@ -337,11 +341,10 @@ def _offer(row: Mapping[str, Any]) -> Offer | None:
     )
 
 
-def _details(row: Mapping[str, Any]) -> dict[str, str]:
+def _details(row: Mapping[str, Any]) -> dict[str, str | None]:
     paths = row.get("googleCategories")
     category = _text(paths[0])[:CATEGORY_LIMIT].rstrip() if isinstance(paths, list) and paths else ""
-    found = {"description": _note(_mapping(row.get("data")).get("description")), "product_category": category}
-    return {key: value for key, value in found.items() if value}
+    return {"description": _note(_mapping(row.get("data")).get("description")), "product_category": category or None}
 
 
 def _hits(block: Mapping[str, Any]) -> tuple[dict[str, tuple[int, ...]], tuple[str, ...]]:
@@ -478,7 +481,7 @@ class FoldersClient:
                 break
         return items
 
-    async def _async_details(self, page: int, **options: Any) -> tuple[dict[str, dict[str, str]], bool]:
+    async def _async_details(self, page: int, **options: Any) -> tuple[dict[str, dict[str, str | None]], bool]:
         try:
             rows, more = await self._async_page(
                 "affiliateCmsPietTaggingDocuments", "PietTagging", DOCUMENT_FIELDS, page, **options
@@ -577,6 +580,10 @@ class FoldersClient:
         if not isinstance(pages := block.get("thumbnailUrls"), list) or not pages:
             raise FoldersError(UNEXPECTED)
         return min(len(pages), FOLDER_PAGES)
+
+    async def async_get_folder_offers(self, folder: Folder) -> list[Offer]:
+        variables = {"o": {"affiliateSlug": AFFILIATE, "publicationVariantId": folder.folder_id}}
+        return self._offers(_rows(await self._async_data(FOLDER_OFFERS_QUERY, variables, FOLDER_OFFERS, list)), {})
 
     async def async_get_text(self, folder: Folder) -> tuple[str, ...]:
         block = await self._async_data(

@@ -4,7 +4,7 @@ from collections.abc import Callable
 from contextlib import suppress
 from datetime import timedelta
 from http import HTTPStatus
-from operator import itemgetter
+from operator import attrgetter, itemgetter
 import re
 import time
 from typing import Any
@@ -52,6 +52,8 @@ _PAGE_KEY = re.compile(rf"({_UUID.pattern})\.([1-9][0-9]{{0,2}})")
 UUID = vol.All(str, vol.Lower, vol.Match(rf"{_UUID.pattern}\Z"))
 STORES = vol.All([UUID], vol.Length(min=1, max=STORE_IDS))
 _KM = itemgetter(1)
+_PAGE = attrgetter("page")
+_VIEWER_KEYS = ("offer_id", "title", "price", "sale_price", "label", "description", "page")
 
 type Signer = Callable[[str, str], str] | None
 
@@ -96,7 +98,6 @@ def _result(
         "title": offer.title,
         "price": offer.price,
         "sale_price": offer.sale_price,
-        "label": offer.label,
         "description": offer.description,
         "product_category": offer.product_category,
         **_image(sign, offer),
@@ -410,7 +411,7 @@ async def websocket_pages(hass: HomeAssistant, connection: websocket_api.ActiveC
 async def _async_pages(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, folder_id: str
 ) -> dict[str, Any]:
-    answer: dict[str, Any] = {"status": "ok", "folder": None, "pages": [], "thumbs": [], "offers": []}
+    answer: dict[str, Any] = {"status": "ok", "folder": None, "pages": [], "thumbs": []}
     if (coordinator := loaded_coordinator(hass)) is None:
         return {**answer, "status": "not_loaded"}
     data = coordinator.data
@@ -434,30 +435,37 @@ async def _async_pages(
         count = await coordinator.async_folder(folder)
     except FoldersError:
         return {**answer, "status": "unavailable"}
-    sign = _signer(hass, connection)
-    offers = coordinator.known_offers(folder_id)
-    shown = sorted((offer for offer in offers if offer.page and offer.page <= count), key=lambda offer: offer.page)
-    coordinator.client.keep(shown)
-    numbers = range(1, count + 1)
+    sign, numbers = _signer(hass, connection), range(1, count + 1)
     return {
         **answer,
         "pages": [sign("page", f"{folder_id}.{number}") for number in numbers],
         "thumbs": [sign("thumb", f"{folder_id}.{number}") for number in numbers],
-        "offers": [
-            {
-                "offer_id": offer.offer_id,
-                "title": offer.title,
-                "price": offer.price,
-                "sale_price": offer.sale_price,
-                "label": offer.label,
-                "description": offer.description,
-                "product_category": offer.product_category,
-                "page": offer.page,
-                **_image(sign, offer),
-            }
-            for offer in shown
-        ],
     }
+
+
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/offers", vol.Required("folder_id"): UUID})
+@websocket_api.async_response
+async def websocket_offers(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    connection.send_result(msg["id"], await _async_offers(hass, connection, msg["folder_id"]))
+
+
+async def _async_offers(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, folder_id: str
+) -> dict[str, Any]:
+    if (coordinator := loaded_coordinator(hass)) is None:
+        return {"status": "not_loaded", "offers": []}
+    if (folder := coordinator.data.index.get(folder_id)) is None:
+        return {"status": "unknown", "offers": []}
+    try:
+        offers = await coordinator.async_folder_offers(folder)
+    except FoldersError:
+        return {"status": "unavailable", "offers": []}
+    sign, shown = _signer(hass, connection), sorted(unique(offer for offer in offers if offer.page), key=_PAGE)
+    coordinator.client.keep(shown)
+    rows = [{**{key: getattr(offer, key) for key in _VIEWER_KEYS}, **_image(sign, offer)} for offer in shown]
+    return {"status": "ok", "offers": rows}
 
 
 @websocket_api.websocket_command(
