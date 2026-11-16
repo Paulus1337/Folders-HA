@@ -144,7 +144,7 @@ The map works best in a panel view, which gives it the whole screen: the card ke
 
 A link to a dashboard view with the Folders card can open a folder: add `?folders_folder=<folder id>` and optionally `&folders_page=<page>` and `&folders_query=<text>` (the search in the folder). The notification blueprint uses these links. The card removes them from the address once the folder is open.
 
-If the card is missing right after installing or updating Folders-HA, reload the page or restart the Home Assistant app; on Android, see [Troubleshooting](#troubleshooting) if that does not help.
+If the card is missing right after installing or updating Folders-HA, reload the page or restart the Home Assistant app.
 
 ### Example dashboard
 
@@ -347,7 +347,6 @@ Anyone who can open your Home Assistant can see the Folders entities, use the ca
 - **"A store cannot be left out and always followed at the same time"**: take the store out of one of the two lists.
 - **The card says "The folders are not available right now"**: the Folders entry is not loaded; check it in **Settings > Devices & services**. The card tries again every 30 seconds.
 - **The card says "No folders right now"**: none of the stores you follow has a current or coming folder. Check which stores and categories you left out in **Settings > Devices & services > Folders > Configure**.
-- **The Home Assistant app on Android shows "Custom element doesn't exist: folders-card"** (or "Configuration error") while a browser shows the card: the app keeps its own copy of the Home Assistant page and can keep using a copy from before Folders was installed. Reopening the app or clearing its cache does not help; in Android, **Settings > Apps > Home Assistant > Storage > Clear storage** does. Sign in to the app again afterwards and check that notifications to the phone still arrive.
 - **The log says "folders.nl does not answer as expected (...), showing the folders of ..."**: folders.nl could not be reached, sent an error, or sent an empty list or less than half of the stores or folders it had before. Folders keeps showing the folders of that time, with the folders that end dropping out and coming ones starting on time, and tries again every 15 minutes; the log says "folders.nl answers again" when it is back. After 24 hours the Folders entities become unavailable (except the watch list and the event entity) until folders.nl answers. When folders.nl really has far fewer stores or folders, Folders shows them once the same answer has come back for 6 hours.
 - **A watch word has no text on the watch list**: the word is paused, or folders.nl has not answered its search yet: a new word is searched 5 seconds after the change, and folders.nl sometimes answers the search of a text with an error. The word gets its text once folders.nl answers it; the other words keep updating meanwhile (see [Updates and outages](#updates-and-outages)).
 - **Near you turns off again with "Shops are not available right now"**: the shop list is not available (see the map messages below), or the Folders entry is not loaded. Select the chip again later.
