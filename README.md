@@ -148,7 +148,7 @@ If the card is missing right after installing or updating Folders-HA, reload the
 
 ### Example dashboard
 
-[`examples/dashboard.yaml`](examples/dashboard.yaml) is a dashboard with two views: **Folders** with the Folders card, the watch list and the calendar, and **Map** with the map in a panel view. The screenshots show real store logos and the OpenStreetMap shops of central Utrecht, with made-up folders, offers and prices.
+[`examples/dashboard.yaml`](examples/dashboard.yaml) is a dashboard with two views: **Folders** with the Folders card, the watch list and the calendar, and **Map** with the map in a panel view. The screenshots show real folders, offers, prices and store logos of 12 stores from folders.nl on 16 November 2026 and the OpenStreetMap shops of central Utrecht; the folders, logos and names belong to their stores.
 
 ![The Folders view on a laptop: search, theme and category chips, the watch list with its matches and mentions, best deals and the folders, next to the watch list and the calendar](examples/dashboard-laptop.png)
 
