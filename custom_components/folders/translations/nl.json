@@ -58,6 +58,9 @@
           "folder_id": {
             "name": "Folder-ID"
           },
+          "label": {
+            "name": "Prijslabel"
+          },
           "limit": {
             "name": "Prijsgrens"
           },

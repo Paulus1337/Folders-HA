@@ -62,6 +62,7 @@ def describe(data: FoldersData, text: str, language: str) -> str:
     if (offer := data.best(text)) is not None:
         prices = list(dict.fromkeys(f"{price:.2f}" for price in (offer.sale_price, offer.price) if price))
         price = f", {prices[0]} (was {prices[1]})" if len(prices) == 2 else "".join(f", {item}" for item in prices)
+        price += f", {_plain(offer.label)}" if offer.label else ""
         number = f", {page} {offer.page}" if offer.page else ""
         far = _far(data.near.get(offer.store_id), dutch)
         store, title = _plain(data.stores[offer.store_id].name), _plain(offer.title)

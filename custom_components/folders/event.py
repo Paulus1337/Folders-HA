@@ -38,6 +38,7 @@ def _offer(data: FoldersData, offer: Offer, count: int) -> dict[str, Any]:
         "title": offer.title,
         "price": offer.price,
         "sale_price": offer.sale_price,
+        "label": offer.label,
         "description": offer.description,
         "word": offer.word,
         "limit": offer.limit,

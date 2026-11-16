@@ -303,7 +303,8 @@ const money = (language, value) =>
 const price = (t, language, item) => {
   const sale = money(language, item.sale_price);
   const full = money(language, item.price);
-  return sale && full && sale !== full ? `${sale} (${t.was} ${full})` : sale || full;
+  const shown = sale && full && sale !== full ? `${sale} (${t.was} ${full})` : sale || full;
+  return [shown, text(item.label)].filter(Boolean).join(", ");
 };
 const far = (language, item) => {
   const known = Number.isFinite(item.distance) && item.distance >= 0;
@@ -900,7 +901,7 @@ class FoldersCard extends HTMLElement {
     const props = opens ? { type: "button", className: "show", onclick: () => void read(show) } : { className: "show" };
     const show = el(opens ? "button" : "div", props, ...parts);
     const go = target && actions && button("open", t.open, () => read(go));
-    const label = [text(store), cost].filter(Boolean).join(", ");
+    const label = [text(store), cost, text(item.label)].filter(Boolean).join(", ");
     const entry = label ? `${title} (${label})` : title;
     const add = this._list && title && button("add", t.add, () => this._add(this._list, entry, `${t.added}: ${title}`));
     return el("div", { className: "item" }, show, go, add);

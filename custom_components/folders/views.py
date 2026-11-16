@@ -96,6 +96,7 @@ def _result(
         "title": offer.title,
         "price": offer.price,
         "sale_price": offer.sale_price,
+        "label": offer.label,
         "description": offer.description,
         "product_category": offer.product_category,
         **_image(sign, offer),
@@ -379,12 +380,7 @@ async def _async_overview(
         "watch": {
             "words": coordinator.watch.words,
             "matches": [
-                {
-                    **offer_row(data, offer, sign),
-                    "description": offer.description,
-                    "word": offer.word,
-                    **match_attributes(data, offer),
-                }
+                {**offer_row(data, offer, sign), "word": offer.word, **match_attributes(data, offer)}
                 for offer in matches
             ],
             "mentions": [
@@ -435,13 +431,12 @@ async def _async_pages(
     if folder.page(1) is None:
         return {**answer, "status": "unavailable"}
     try:
-        count, offers = await coordinator.async_folder(folder)
+        count = await coordinator.async_folder(folder)
     except FoldersError:
         return {**answer, "status": "unavailable"}
     sign = _signer(hass, connection)
-    shown = sorted(
-        unique(offer for offer in offers if offer.page and offer.page <= count), key=lambda offer: offer.page
-    )
+    offers = coordinator.known_offers(folder_id)
+    shown = sorted((offer for offer in offers if offer.page and offer.page <= count), key=lambda offer: offer.page)
     coordinator.client.keep(shown)
     numbers = range(1, count + 1)
     return {
@@ -454,6 +449,7 @@ async def _async_pages(
                 "title": offer.title,
                 "price": offer.price,
                 "sale_price": offer.sale_price,
+                "label": offer.label,
                 "description": offer.description,
                 "product_category": offer.product_category,
                 "page": offer.page,

@@ -36,7 +36,7 @@ class FoldersOffers(FoldersEntity, SensorEntity):
         return {
             "words": list(data.watches),
             "offers": [
-                {**offer_attributes(data, offer), "description": offer.description, **match_attributes(data, offer)}
+                {**offer_attributes(data, offer), **match_attributes(data, offer)}
                 for offer in data.offers[:OFFER_LIMIT]
             ],
         }

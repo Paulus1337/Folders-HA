@@ -46,6 +46,7 @@ FOLDER_TIME = timedelta(hours=6)
 SEARCH_TIME = timedelta(minutes=10)
 SUGGEST_TIMEOUT = 5
 LIVE_ITEMS = 100
+COUNT_ITEMS = 1000
 TEXT_ITEMS = 20
 CATEGORY_DEALS = 30
 ALL_DEALS = 50
@@ -61,6 +62,13 @@ def _shown(folders: list[Folder], now: datetime) -> list[Folder]:
     current = [folder for folder in folders if folder.valid_from <= now]
     first = max(current, key=_START) if current else min(folders, key=_START)
     return [first, *sorted((folder for folder in folders if folder is not first), key=_START)]
+
+
+def _distinct(offers: Iterable[Offer]) -> list[Offer]:
+    kept: dict[tuple[Any, ...], Offer] = {}
+    for offer in offers:
+        kept.setdefault((offer.store_id, offer.title.casefold(), offer.price, offer.sale_price, offer.label), offer)
+    return list(kept.values())
 
 
 def _left_out(excluded: Container[str], store: Store) -> bool:
@@ -160,6 +168,7 @@ class FoldersCoordinator(DataUpdateCoordinator[FoldersData]):
         self._texts: dict[str, tuple[datetime, Any]] = {}
         self._themes: dict[str, tuple[datetime, Any]] = {}
         self._live = asyncio.Semaphore(2)
+        self._counting: dict[str, asyncio.Task[int]] = {}
         self._unsub_watch: CALLBACK_TYPE | None = None
         entry.async_on_unload(self._async_cancel_watch)
 
@@ -326,7 +335,7 @@ class FoldersCoordinator(DataUpdateCoordinator[FoldersData]):
                 for text, watch in watches.items()
                 if watch.limit is None and watch.word in answers.hits
             },
-            sorted(current_offers(answers.deals, index, followed, now), key=_RATIO),
+            _distinct(sorted(current_offers(answers.deals, index, followed, now), key=_RATIO)),
             self.shops.nearest({offer.store_id for offer in offers}, config.latitude, config.longitude),
             answers.time,
         )
@@ -359,10 +368,31 @@ class FoldersCoordinator(DataUpdateCoordinator[FoldersData]):
         except TimeoutError:
             raise FoldersError("The suggestions took too long") from None
 
-    async def async_folder(self, folder: Folder) -> tuple[int, list[Offer]]:
-        return await self._async_live(
-            self._folders, folder.folder_id, FOLDER_TIME, partial(self.client.async_get_folder, folder)
-        )
+    async def async_folder(self, folder: Folder) -> int:
+        if (count := self.page_count(folder.folder_id)) is not None:
+            return count
+        if (task := self._counting.get(folder.folder_id)) is None or task.done():
+            fetch = partial(self.client.async_get_folder, folder)
+            task = self._counting[folder.folder_id] = self.config_entry.async_create_background_task(
+                self.hass,
+                self._async_live(self._folders, folder.folder_id, timedelta.max, fetch, COUNT_ITEMS),
+                f"{DOMAIN} folder",
+            )
+            task.add_done_callback(partial(self._counted, folder.folder_id))
+        return await asyncio.shield(task)
+
+    def _counted(self, folder_id: str, task: asyncio.Task[int]) -> None:
+        if self._counting.get(folder_id) is task:
+            del self._counting[folder_id]
+        if not task.cancelled():
+            task.exception()
+
+    def known_offers(self, folder_id: str) -> list[Offer]:
+        answers = self._answers
+        found = [*(answers.found.values() if answers else ()), *(item for _, item in self._searches.values())]
+        lists = [*(item.offers for item in found), *(item for _, item in self._themes.values())]
+        lists.append(answers.deals if answers else [])
+        return unique(offer for offers in lists for offer in offers if offer.folder_id == folder_id)
 
     async def async_find(self, folder: Folder, text: str) -> list[int] | None:
         async def fetch() -> tuple[str, ...]:
@@ -385,7 +415,7 @@ class FoldersCoordinator(DataUpdateCoordinator[FoldersData]):
             partial(self.client.async_get_deals, THEME_DEALS, themeId=label.category_id),
         )
         data = self.data
-        return sorted(current_offers(offers, data.index, data.followed, dt_util.utcnow()), key=_RATIO)
+        return _distinct(sorted(current_offers(offers, data.index, data.followed, dt_util.utcnow()), key=_RATIO))
 
     def page_count(self, folder_id: str) -> int | None:
-        return cached[1][0] if (cached := self._folders.get(folder_id)) else None
+        return cached[1] if (cached := self._folders.get(folder_id)) else None

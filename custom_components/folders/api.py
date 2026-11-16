@@ -41,6 +41,7 @@ RETRY_STATUSES = frozenset({429, 502, 503, 504})
 RETRY_DELAYS = (30, 90)
 TEXT_LIMIT = 200
 CATEGORY_LIMIT = 60
+LABEL_SLACK = 2
 STORE_FIELDS = "id name slug logoUrl website categories{ slug }"
 FOLDER_FIELDS = "id name slug createdAt validFrom validUntil coverUrl retailer{ id } meta{ themes{ slug } }"
 OFFER_FIELDS = (
@@ -51,10 +52,6 @@ DOCUMENT_FIELDS = "pietTaggingId data googleCategories"
 FOLDER_QUERY = (
     "query($s: String!, $id: UUID!){ affiliateCmsPublicationVariant(affiliateSlug:$s, publicationVariantId:$id){ "
     "id thumbnailUrls } }"
-)
-FOLDER_OFFERS_QUERY = (
-    "query($o: InputAffiliateCmsPublicationVariantPietTaggings!){ affiliateCmsPublicationVariantPietTaggings("
-    "options:$o){ id data publicationVariantPageIndex interactionImageUrl } }"
 )
 SUGGEST_QUERY = (
     "query($o: InputAffiliateCmsPietTaggingPagination!){ affiliateCmsPietTaggings(options:$o){ items{ data "
@@ -86,6 +83,8 @@ _THUMB = re.compile(r"-thumb(?=\.\w+(?:\?|$))")
 _PAGE = re.compile(r"pages%2F1-thumb\.jpg(?=\?|$)")
 _SPECIAL = re.compile(r'[\\.^$|?*+()\[\]{}"]')
 _SPACES = re.compile(r"[^a-z0-9]+")
+_WORD = re.compile(r"[^\W_]")
+_PERCENT = re.compile(r"(?<![\d.,])([1-9]\d?)\s*%")
 _SEPARATORS = re.compile(r"[ :|/,;\u2013\u2014-]+")
 _KINDS = {"node": "n", "way": "w", "relation": "r"}
 
@@ -123,6 +122,16 @@ def _number(value: Any) -> float | None:
 def _price(value: Any) -> float | None:
     number = _number(value)
     return number if number and number > 0 else None
+
+
+def _note(value: Any) -> str | None:
+    text = _text(value)
+    return text if _WORD.search(text) else None
+
+
+def _percent(label: str | None) -> float | None:
+    found = _PERCENT.search(label or "")
+    return float(found[1]) if found else None
 
 
 def _page(index: Any) -> int | None:
@@ -223,10 +232,13 @@ class Offer:
     limit: float | None = None
     description: str | None = None
     product_category: str | None = None
+    label: str | None = None
 
     @property
     def ratio(self) -> float:
-        return self.sale_price / self.price if self.price and self.sale_price else 1.0
+        if self.price and self.sale_price:
+            return self.sale_price / self.price
+        return 1 - percent / 100 if (percent := _percent(self.label)) else 1.0
 
     @property
     def identity(self) -> tuple[str, tuple[Any, ...]]:
@@ -301,42 +313,39 @@ def _folder(row: Mapping[str, Any]) -> Folder | None:
     )
 
 
-def _offer(row: Mapping[str, Any], folder: Folder | None) -> Offer | None:
+def _offer(row: Mapping[str, Any]) -> Offer | None:
     data, variant = _mapping(row.get("data")), _mapping(row.get("publicationVariant"))
-    if folder is None:
-        store_id, folder_id = _match(_ID, _mapping(row.get("retailer")).get("id")), _match(_ID, variant.get("id"))
-        start, end = parse_time(variant.get("validFrom")), parse_time(variant.get("validUntil"))
-        url = folder_url(_match(_SLUG, variant.get("slug")))
-    else:
-        store_id, folder_id, start, end, url = (
-            folder.store_id,
-            folder.folder_id,
-            folder.valid_from,
-            folder.valid_until,
-            folder.url,
-        )
+    store_id, folder_id = _match(_ID, _mapping(row.get("retailer")).get("id")), _match(_ID, variant.get("id"))
+    start, end = parse_time(variant.get("validFrom")), parse_time(variant.get("validUntil"))
+    url = folder_url(_match(_SLUG, variant.get("slug")))
     offer_id, title = _match(_ID, row.get("id")), _text(data.get("title"))
     if offer_id is None or store_id is None or folder_id is None or start is None or end is None or not title:
         return None
+    price, sale, label = _price(data.get("price")), _price(data.get("priceSale")), _note(data.get("priceLabel"))
+    if price and sale and (percent := _percent(label)) and 100 * (1 - sale / price) > percent + LABEL_SLACK:
+        sale = None
     return Offer(
         offer_id,
         store_id,
         folder_id,
         title,
-        _price(data.get("price")),
-        _price(data.get("priceSale")),
+        price,
+        sale,
         _page(row.get("publicationVariantPageIndex")),
         _match(_IMAGE, row.get("interactionImageUrl")),
         url,
         start,
         end,
+        description=_note(data.get("description")),
+        label=label,
     )
 
 
-def _details(row: Mapping[str, Any]) -> dict[str, str | None]:
-    description, paths = _text(_mapping(row.get("data")).get("description")), row.get("googleCategories")
+def _details(row: Mapping[str, Any]) -> dict[str, str]:
+    paths = row.get("googleCategories")
     category = _text(paths[0])[:CATEGORY_LIMIT].rstrip() if isinstance(paths, list) and paths else ""
-    return {"description": None if description in ("", "-") else description, "product_category": category or None}
+    found = {"description": _note(_mapping(row.get("data")).get("description")), "product_category": category}
+    return {key: value for key, value in found.items() if value}
 
 
 def _hits(block: Mapping[str, Any]) -> tuple[dict[str, tuple[int, ...]], tuple[str, ...]]:
@@ -473,7 +482,7 @@ class FoldersClient:
                 break
         return items
 
-    async def _async_details(self, page: int, **options: Any) -> tuple[dict[str, dict[str, str | None]], bool]:
+    async def _async_details(self, page: int, **options: Any) -> tuple[dict[str, dict[str, str]], bool]:
         try:
             rows, more = await self._async_page(
                 "affiliateCmsPietTaggingDocuments", "PietTagging", DOCUMENT_FIELDS, page, **options
@@ -501,10 +510,8 @@ class FoldersClient:
         while len(self.images) > OFFER_IMAGES:
             del self.images[next(iter(self.images))]
 
-    def _offers(
-        self, rows: Iterable[Mapping[str, Any]], details: Mapping[str, Mapping[str, Any]], folder: Folder | None = None
-    ) -> list[Offer]:
-        offers = [replace(offer, **details.get(offer.offer_id, {})) for row in rows if (offer := _offer(row, folder))]
+    def _offers(self, rows: Iterable[Mapping[str, Any]], details: Mapping[str, Mapping[str, Any]]) -> list[Offer]:
+        offers = [replace(offer, **details.get(offer.offer_id, {})) for row in rows if (offer := _offer(row))]
         self.keep(offers)
         return offers
 
@@ -567,27 +574,13 @@ class FoldersClient:
         )
         return self._offers(rows, {})
 
-    async def async_get_folder(self, folder: Folder) -> tuple[int, list[Offer]]:
+    async def async_get_folder(self, folder: Folder) -> int:
         block = await self._async_data(
             FOLDER_QUERY, {"s": AFFILIATE, "id": folder.folder_id}, "affiliateCmsPublicationVariant"
         )
         if not isinstance(pages := block.get("thumbnailUrls"), list) or not pages:
             raise FoldersError(UNEXPECTED)
-        rows = _rows(
-            await self._async_data(
-                FOLDER_OFFERS_QUERY,
-                {"o": {"affiliateSlug": AFFILIATE, "publicationVariantId": folder.folder_id}},
-                "affiliateCmsPublicationVariantPietTaggings",
-                list,
-            )
-        )
-        details: dict[str, dict[str, str | None]] = {}
-        page, more = 0, bool(rows)
-        while more and page < OFFER_PAGES:
-            page += 1
-            found, more = await self._async_details(page, publicationVariantId=folder.folder_id)
-            details |= found
-        return min(len(pages), FOLDER_PAGES), self._offers(rows, details, folder)
+        return min(len(pages), FOLDER_PAGES)
 
     async def async_get_text(self, folder: Folder) -> tuple[str, ...]:
         block = await self._async_data(

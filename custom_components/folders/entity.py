@@ -24,10 +24,12 @@ def offer_attributes(data: FoldersData, offer: Offer) -> dict[str, Any]:
         "title": offer.title,
         "price": offer.price,
         "sale_price": offer.sale_price,
+        "label": offer.label,
         "valid_until": offer.valid_until.isoformat(),
         "folder_id": offer.folder_id,
         "page": offer.page,
         "url": offer.url,
+        "description": offer.description,
     }
 
 
