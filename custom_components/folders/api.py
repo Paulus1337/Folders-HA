@@ -84,7 +84,7 @@ _PAGE = re.compile(r"pages%2F1-thumb\.jpg(?=\?|$)")
 _SPECIAL = re.compile(r'[\\.^$|?*+()\[\]{}"]')
 _SPACES = re.compile(r"[^a-z0-9]+")
 _WORD = re.compile(r"[^\W_]")
-_PERCENT = re.compile(r"(?<![\d.,])([1-9]\d?)\s*%")
+_PERCENT = re.compile(r"-? ?([1-9]\d?) ?% ?(?:korting)?", re.IGNORECASE)
 _SEPARATORS = re.compile(r"[ :|/,;\u2013\u2014-]+")
 _KINDS = {"node": "n", "way": "w", "relation": "r"}
 
@@ -129,7 +129,7 @@ def _note(value: Any) -> str | None:
 
 
 def _percent(label: str | None) -> float:
-    return float(found[1]) if (found := _PERCENT.search(label or "")) else 0.0
+    return float(found[1]) if (found := _PERCENT.fullmatch(label or "")) else 0.0
 
 
 def _page(index: Any) -> int | None:

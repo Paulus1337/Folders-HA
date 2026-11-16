@@ -67,7 +67,8 @@ def _shown(folders: list[Folder], now: datetime) -> list[Folder]:
 def _ranked(offers: Iterable[Offer]) -> list[Offer]:
     kept: dict[tuple[Any, ...], Offer] = {}
     for offer in sorted(offers, key=_RATIO):
-        kept.setdefault((offer.store_id, offer.title.casefold(), offer.price, offer.sale_price, offer.label), offer)
+        key = offer.store_id, offer.title.casefold(), offer.price, offer.sale_price, (offer.label or "").casefold()
+        kept.setdefault(key, offer)
     return list(kept.values())
 
 
@@ -371,16 +372,18 @@ class FoldersCoordinator(DataUpdateCoordinator[FoldersData]):
     async def async_folder(self, folder: Folder) -> int:
         if (count := self.page_count(folder_id := folder.folder_id)) is not None:
             return count
-        if (task := self._counting.get(folder_id)) is None or task.done():
+        if (task := self._counting.get(folder_id)) is None:
             fetch = partial(self.client.async_get_folder, folder)
             live = self._async_live(self._folders, folder_id, timedelta.max, fetch, COUNT_ITEMS)
             task = self._counting[folder_id] = self.config_entry.async_create_background_task(self.hass, live, DOMAIN)
             task.add_done_callback(partial(self._counted, folder_id))
-        return await asyncio.shield(task)
+        await asyncio.wait((task,))
+        if task.cancelled():
+            raise FoldersError("Folders was unloaded")
+        return task.result()
 
     def _counted(self, folder_id: str, task: asyncio.Task[int]) -> None:
-        if self._counting.get(folder_id) is task:
-            del self._counting[folder_id]
+        del self._counting[folder_id]
         if not task.cancelled():
             task.exception()
 
