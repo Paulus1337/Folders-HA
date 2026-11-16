@@ -36,8 +36,14 @@
       "folders": {
         "name": "Folders",
         "state_attributes": {
+          "address": {
+            "name": "Address"
+          },
           "description": {
             "name": "Description"
+          },
+          "distance": {
+            "name": "Distance"
           },
           "event_type": {
             "state": {
@@ -51,6 +57,9 @@
           },
           "folder_id": {
             "name": "Folder ID"
+          },
+          "limit": {
+            "name": "Price limit"
           },
           "new_mentions": {
             "name": "New mentions"
@@ -149,6 +158,9 @@
   "exceptions": {
     "duplicate_word": {
       "message": "This word is already on the watch list."
+    },
+    "invalid_limit": {
+      "message": "Use a price limit from 0.01 to 9999 with at most two decimals, for example pindakaas < 2,50."
     },
     "invalid_word": {
       "message": "Use a word of 2 to 40 characters."

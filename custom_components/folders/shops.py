@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Container, Iterable
+from collections.abc import Collection, Container, Iterable
 from dataclasses import astuple
 from datetime import datetime, timedelta
 import heapq
@@ -85,17 +85,17 @@ class ShopList:
         self._use(await self._coordinator.hass.async_add_executor_job(_shops, rows, self._stale), updated)
 
     @callback
-    def async_start(self, now: datetime) -> None:
+    def async_start(self, now: datetime, stores: Collection[Store]) -> None:
         fresh = not self._stale and self.updated is not None and timedelta(0) <= now - self.updated < REFRESH
         waiting = self._failed is not None and now - self._failed < RETRY
         if not (self.loading or fresh or waiting):
             coordinator = self._coordinator
             self._task = coordinator.config_entry.async_create_background_task(
-                coordinator.hass, self._async_download(), f"{DOMAIN} shops"
+                coordinator.hass, self._async_download([*stores]), f"{DOMAIN} shops"
             )
 
-    async def _async_download(self) -> None:
-        hass, stores = self._coordinator.hass, [*self._coordinator.data.stores.values()]
+    async def _async_download(self, stores: list[Store]) -> None:
+        hass = self._coordinator.hass
         try:
             body = await async_get_shops(async_get_clientsession(hass), stores)
             shops, rows = await hass.async_add_executor_job(_parse, body, stores)
@@ -105,6 +105,7 @@ class ShopList:
             return
         self._use(shops, dt_util.utcnow())
         self._failed, self._stale = None, False
+        self._coordinator.async_shops_loaded()
         await self._storage.async_save({"version": VERSION, "time": self.updated.isoformat(), "shops": rows})
 
     def find(
@@ -134,3 +135,13 @@ class ShopList:
             for shop in self._stores.get(store_id, ())
         )
         return heapq.nsmallest(limit, found, key=_FIRST)
+
+    def around(self, stores: Iterable[str], latitude: float, longitude: float, radius: float) -> dict[str, float]:
+        reach = math.degrees(radius / EARTH)
+        found: dict[str, float] = {}
+        for store_id in stores:
+            shops = self._stores.get(store_id, ())
+            kms = [distance(latitude, longitude, shop) for shop in shops if abs(shop.latitude - latitude) <= reach]
+            if kms and (km := min(kms)) <= radius:
+                found[store_id] = km
+        return found

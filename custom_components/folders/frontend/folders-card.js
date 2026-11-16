@@ -15,6 +15,17 @@ input[type="search"] {
   flex: 1; min-width: 0; padding: 8px 12px; border: 1px solid var(--divider-color); border-radius: 18px;
   background: var(--card-background-color); color: var(--primary-text-color); font: inherit;
 }
+.field { position: relative; display: flex; flex: 1; min-width: 0; }
+.tips {
+  position: absolute; top: 100%; left: 0; right: 0; z-index: 1001; max-height: 50vh; overflow-y: auto; margin-top: 4px;
+  padding: 4px 0; border: 1px solid var(--divider-color); border-radius: 12px; background: var(--card-background-color);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+.maps .tips { max-height: min(50vh, 400px); }
+.tip { display: flex; align-items: center; gap: 12px; padding: 8px 12px; cursor: pointer; }
+.tip:hover, .tip[aria-selected="true"] { background: var(--secondary-background-color); }
+.tip img { height: 24px; max-width: 48px; object-fit: contain; }
+.tip ha-icon { --mdc-icon-size: 20px; color: var(--secondary-text-color); }
 .go { padding: 8px 16px; border-radius: 18px; background: var(--primary-color); color: var(--text-primary-color); }
 .toggle { display: flex; align-items: center; gap: 6px; font-size: 0.9em; white-space: nowrap; }
 .chips { display: flex; gap: 8px; padding: 12px 16px 0; overflow-x: auto; scrollbar-width: thin; }
@@ -93,8 +104,12 @@ const TEXTS = {
     new: "New",
     search: "Search offers",
     find: "Search",
+    tips: "Suggestions",
     watch: "Watch",
     mine: "Only my stores",
+    area: "Near you",
+    you: "Around your location",
+    home: "Around home",
     short: "Type 2 to 40 characters.",
     busy: "Searching",
     nothing: "No offers found.",
@@ -155,8 +170,12 @@ const TEXTS = {
     new: "Nieuw",
     search: "Zoek aanbiedingen",
     find: "Zoeken",
+    tips: "Suggesties",
     watch: "Volgen",
     mine: "Alleen mijn winkels",
+    area: "In de buurt",
+    you: "Rond je locatie",
+    home: "Rond thuis",
     short: "Typ 2 tot 40 tekens.",
     busy: "Bezig met zoeken",
     nothing: "Geen aanbiedingen gevonden.",
@@ -226,6 +245,8 @@ const SIGNED = /^\/api\/folders\/image\/\w+\/[\w-][\w.-]*\?authSig=[\w.-]+$/;
 const HALF_HOUR = 1800000;
 const UUID = /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 const SLUG = /^[a-z0-9-]{1,120}$/;
+const LIMIT = /\s*(<|(^|\s)(max|under|onder)(?=\s*\u20ac?\s*\d))\s*\u20ac?\s*[\d.,]*$/i;
+const POINTER = "ha-entity-marker { cursor: pointer; }";
 const FEATURED = "*";
 
 const el = (tag, props, ...children) => {
@@ -241,7 +262,18 @@ const link = (label, url) => button("link", label, () => window.open(url, "_blan
 const list = (value) => (Array.isArray(value) ? value.filter((item) => item && typeof item === "object") : []);
 const uuid = (value) => (typeof value === "string" && UUID.test(value) ? value : null);
 const clean = (value) => text(value).trim().replace(/\s+/g, " ");
+const bare = (value) => clean(value).replace(LIMIT, "");
 const fits = (query) => query.length >= 2 && query.length <= 40;
+const apart = (a, b) => {
+  const rad = Math.PI / 180;
+  const lat = Math.sin(((b.lat - a.lat) * rad) / 2) ** 2;
+  const lon = Math.sin(((b.lon - a.lon) * rad) / 2) ** 2;
+  return 12742 * Math.asin(Math.sqrt(lat + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * lon));
+};
+const shorten = (value) => {
+  const cut = value.slice(0, 41).replace(/\s*\S*$/, "");
+  return value.length <= 40 ? value : fits(cut) ? cut : value.slice(0, 40);
+};
 const numbers = (value) => (Array.isArray(value) ? value.filter((page) => Number.isInteger(page) && page > 0) : []);
 const icon = (icons, slug, fallback) => `mdi:${Object.hasOwn(icons, slug) ? icons[slug] : fallback}`;
 const kinds = (value) => {
@@ -309,16 +341,20 @@ class FoldersCard extends HTMLElement {
   setConfig(config) {
     const view = config?.view ?? "folders";
     const zoom = config?.zoom ?? 14;
+    const radius = config?.radius ?? 5;
     const shopping = config?.shopping_list ?? "todo.shopping_list";
     if (view !== "folders" && view !== "map") throw new Error("view must be folders or map");
     if (typeof zoom !== "number" || !(zoom >= 1 && zoom <= 20)) throw new Error("zoom must be a number from 1 to 20");
+    if (typeof radius !== "number" || !(radius >= 0.5 && radius <= 50)) {
+      throw new Error("radius must be a number from 0.5 to 50");
+    }
     if (typeof shopping !== "string" || !/^todo\.[a-z0-9_]+$/.test(shopping)) {
       throw new Error("shopping_list must be a todo entity");
     }
     this._stop();
-    this._config = { view, zoom, list: shopping };
+    this._config = { view, zoom, radius, list: shopping };
     this._map = this._drawn = this._look = this._marks = this._data = this._found = this._viewer = undefined;
-    this._card = this._main = this._rest = this._body = this._hunt = this._spot = undefined;
+    this._card = this._main = this._rest = this._body = this._hunt = this._spot = this._tips = undefined;
     this._shops = {};
     this._raw = [[], {}];
     this.shadowRoot.replaceChildren();
@@ -360,8 +396,10 @@ class FoldersCard extends HTMLElement {
     const old = this._hass;
     this._hass = hass;
     this._list = this._config && hass.states[this._config.list] ? this._config.list : undefined;
-    if (this._config?.view === "folders") this._watch(hass);
-    else if (this._map && (!old || ["themes", "language", "locale"].some((key) => old[key] !== hass[key]))) {
+    if (this._config?.view === "folders") {
+      this._watch(hass);
+      this._track();
+    } else if (this._map && (!old || ["themes", "language", "locale"].some((key) => old[key] !== hass[key]))) {
       this._sync();
       this._bar();
       this._drawHunt();
@@ -400,7 +438,7 @@ class FoldersCard extends HTMLElement {
   }
 
   _layout() {
-    const { t } = this._texts();
+    const { language, t } = this._texts();
     const input = el("input", {
       type: "search",
       value: this._input?.value || "",
@@ -408,7 +446,6 @@ class FoldersCard extends HTMLElement {
       ariaLabel: t.search,
       maxLength: 40,
       enterKeyHint: "search",
-      onkeydown: (ev) => ev.key === "Enter" && !ev.isComposing && this._search(input.value),
     });
     const scope = el("input", {
       type: "checkbox",
@@ -423,17 +460,24 @@ class FoldersCard extends HTMLElement {
     this._pickRow = el("div", { className: "chips" });
     this._shown = el("div", { className: "items" });
     this._themeRow = el("div", { className: "chips" });
-    this._kindRow = el("div", { className: "chips" });
+    this._kindRow = el("div", { className: "set" });
+    this._nearChip = el(
+      "button",
+      { type: "button", className: "chip", onclick: () => void this._nearby() },
+      el("ha-icon", { icon: "mdi:map-marker-radius" }),
+      `${t.area}, ${new Intl.NumberFormat(language).format(this._config.radius)} km`,
+    );
     this._rest = el("div");
     const search = el(
       "div",
       { className: "search" },
-      input,
+      this._field(input, (value) => this._search(value)),
       button("go", t.find, () => this._search(input.value)),
       this._watchList && button("go", t.watch, () => this._follow(input.value)),
     );
     const top = el("div", { className: "top" }, search, el("label", { className: "toggle" }, scope, t.mine));
-    this._main = el("div", {}, top, this._results, this._themeRow, this._kindRow, this._rest);
+    const kinds = el("div", { className: "chips" }, this._nearChip, this._kindRow);
+    this._main = el("div", {}, top, this._results, this._themeRow, kinds, this._rest);
     this._card = el("ha-card", {}, this._main);
     this.shadowRoot.replaceChildren(el("style", { textContent: STYLE }), this._card);
     this._draw();
@@ -442,6 +486,144 @@ class FoldersCard extends HTMLElement {
       this._main.hidden = true;
       this._card.append(this._viewer.root);
     }
+  }
+
+  _field(input, run) {
+    const box = el("div", {
+      className: "tips",
+      id: "tips",
+      role: "listbox",
+      ariaLabel: this._texts().t.tips,
+      hidden: true,
+      onmousedown: (ev) => {
+        ev.preventDefault();
+      },
+    });
+    input.setAttribute("aria-controls", box.id);
+    input.addEventListener("compositionend", () => this._typed());
+    Object.assign(input, {
+      role: "combobox",
+      autocomplete: "off",
+      ariaAutoComplete: "list",
+      ariaExpanded: "false",
+      oninput: (ev) => {
+        if (ev.isComposing) clearTimeout(this._wait);
+        else this._typed();
+      },
+      onkeydown: (ev) => {
+        this._press(ev);
+      },
+      onblur: () => {
+        clearTimeout(this._wait);
+        if (this.isConnected) this._wait = setTimeout(() => this._close(), 200);
+      },
+    });
+    this._tips = { input, box, run, rows: [], active: -1 };
+    return el("div", { className: "field" }, input, box);
+  }
+
+  _typed() {
+    const query = bare(this._tips.input.value);
+    clearTimeout(this._wait);
+    if (!fits(query)) this._close();
+    else {
+      this._mark(-1);
+      this._wait = setTimeout(() => this._suggest(query), 300);
+    }
+  }
+
+  async _suggest(query) {
+    if (this._asking) {
+      this._next = query;
+      return;
+    }
+    const tips = this._tips;
+    const asked = (this._tipped = (this._tipped || 0) + 1);
+    let answer = null;
+    this._asking = true;
+    try {
+      answer = await this._hass.callWS({ type: "folders/suggest", query });
+    } catch {
+      answer = null;
+    }
+    const next = this._next;
+    const now = bare(this._tips?.input.value);
+    this._asking = this._next = undefined;
+    if (asked !== this._tipped || tips !== this._tips || now !== query) {
+      if (next === now) this._suggest(next);
+      return;
+    }
+    const at = Date.now();
+    const ok = answer?.status === "ok";
+    const stores = list(ok && answer.stores).filter((store) => uuid(store.folder_id) && clean(store.name));
+    const titles = list(ok && answer.products).map((item) => clean(item.title)).filter(Boolean);
+    this._offer([
+      ...stores.map((store) => {
+        const logo = this._keep(store.logo, at);
+        const pick = () => {
+          this._close();
+          this._read(store.folder_id, 1, tips.input);
+        };
+        return [pick, logo && el("img", { src: logo, alt: "" }), text(store.name)];
+      }),
+      ...titles.map((title) => {
+        const pick = () => {
+          tips.input.value = shorten(title);
+          tips.run(tips.input.value);
+        };
+        return [pick, el("ha-icon", { icon: "mdi:magnify" }), title];
+      }),
+    ]);
+  }
+
+  _offer(rows) {
+    const tips = this._tips;
+    tips.rows = rows.map(([pick, ...parts], index) => {
+      const props = { className: "tip", id: `tips-${index}`, role: "option", onclick: () => void pick() };
+      return { pick, node: el("div", props, ...parts) };
+    });
+    fill(tips.box, ...tips.rows.map((row) => row.node));
+    tips.box.hidden = !rows.length;
+    tips.input.ariaExpanded = String(rows.length > 0);
+    this._mark(-1);
+  }
+
+  _mark(index) {
+    const { input, rows } = this._tips;
+    const row = rows[index]?.node;
+    this._tips.active = index;
+    for (const { node } of rows) node.ariaSelected = String(node === row);
+    if (!row) input.removeAttribute("aria-activedescendant");
+    else {
+      input.setAttribute("aria-activedescendant", row.id);
+      row.scrollIntoView({ block: "nearest" });
+    }
+  }
+
+  _press(ev) {
+    const { input, rows, active, run } = this._tips;
+    const step = ev.key === "ArrowDown" ? 1 : ev.key === "ArrowUp" ? -1 : 0;
+    if (ev.isComposing) return;
+    if (step && rows.length) {
+      ev.preventDefault();
+      this._mark(((active + step + rows.length + 2) % (rows.length + 1)) - 1);
+    } else if (ev.key === "Enter") {
+      if (!rows[active]) run(input.value);
+      else {
+        ev.preventDefault();
+        rows[active].pick();
+      }
+    } else if (ev.key === "Escape" || ev.key === "Tab") {
+      if (ev.key === "Escape" && rows.length) ev.preventDefault();
+      this._close();
+    }
+  }
+
+  _close() {
+    clearTimeout(this._wait);
+    this._tipped = (this._tipped || 0) + 1;
+    this._next = undefined;
+    if (this._tips) this._offer([]);
   }
 
   _topic() {
@@ -469,6 +651,58 @@ class FoldersCard extends HTMLElement {
     this._draw();
   }
 
+  _locate() {
+    const { states, user } = this._hass;
+    const own = (id) => id?.startsWith("person.") && states[id]?.attributes?.user_id === user?.id;
+    if (!own(this._person)) this._person = user?.id ? Object.keys(states).find(own) : undefined;
+    const { latitude: lat, longitude: lon } = states[this._person]?.attributes || {};
+    return Number.isFinite(lat) && Number.isFinite(lon) ? { lat, lon } : null;
+  }
+
+  _track() {
+    const { t } = this._texts();
+    const place = this._locate();
+    const was = this._area?.place;
+    this._nearChip.title = place ? t.you : t.home;
+    if (this._area && this.isConnected && (!place !== !was || (place && apart(place, was) > 0.2))) this._around();
+  }
+
+  _nearby() {
+    this._area = this._area ? undefined : { stores: null };
+    this._around();
+    this._draw();
+  }
+
+  async _around() {
+    clearTimeout(this._later);
+    const area = this._area;
+    const asked = (this._placed = (this._placed || 0) + 1);
+    this._later = undefined;
+    this._placing = Boolean(area);
+    if (!area) return;
+    const place = (area.place = this._locate());
+    let answer = null;
+    try {
+      const at = place ? { latitude: place.lat, longitude: place.lon } : {};
+      answer = await this._hass.callWS({ type: "folders/area", ...at, radius: this._config.radius });
+    } catch {
+      answer = null;
+    }
+    if (asked !== this._placed) return;
+    const status = answer?.status;
+    const stores = status === "ok" && answer.stores && typeof answer.stores === "object" ? answer.stores : {};
+    this._placing = false;
+    if (status === "ok" || status === "loading") {
+      const near = new Map(Object.entries(stores).filter(([id]) => uuid(id)));
+      Object.assign(area, { stores: near, at: place, loading: status === "loading" });
+      this._later = setTimeout(() => this._around(), area.loading ? 15000 : HALF_HOUR);
+    } else {
+      this._area = undefined;
+      this._note(this._texts().t.unavailable);
+    }
+    this._draw();
+  }
+
   _draw() {
     const { language, t } = this._texts();
     const data = this._data || {};
@@ -476,10 +710,11 @@ class FoldersCard extends HTMLElement {
     const named = new Map(list(data.stores).map((store) => [text(store.name), store]));
     this._names = new Map(list(data.categories).map((item) => [item.slug, text(item.name)]));
     const seen = new Set();
+    const near = this._area?.stores;
     const pass = (store) => {
       const slugs = kinds(store?.categories);
       for (const slug of slugs) seen.add(slug);
-      return slugs.some((slug) => !this._off.has(slug));
+      return slugs.some((slug) => !this._off.has(slug)) && (!near || near.has(store?.id));
     };
     const folders = list(data.folders).filter((folder) => uuid(folder.id));
     const theme = this._theme;
@@ -503,6 +738,7 @@ class FoldersCard extends HTMLElement {
     const words = Array.isArray(watch.words) ? watch.words.filter((word) => typeof word === "string") : [];
     const found = list(watch.matches);
     const matches = found.filter((match) => pass(named.get(text(match.store))));
+    const away = (match) => ({ ...match, distance: near.get(named.get(text(match.store))?.id), address: null });
     const mentions = list(watch.mentions).filter(
       (item) => uuid(item.folder_id) && pass(stores.get(item.store_id) || named.get(text(item.store))),
     );
@@ -528,6 +764,7 @@ class FoldersCard extends HTMLElement {
       if (!this._off.delete(slug)) this._off.add(slug);
       this._draw();
     });
+    this._nearChip.ariaPressed = String(Boolean(this._area));
     const items = (className, values) =>
       el("div", { className }, ...values.map((item) => this._item(item, item.folder_id, item.store, data.at)));
     const watched = words.length && 2 + matches.length + 2 * mentions.length;
@@ -535,10 +772,11 @@ class FoldersCard extends HTMLElement {
     fill(
       this._rest,
       this._data === null && line("text", t.down),
+      this._area?.loading && line("text", t.loading),
       words.length && line("heading", t.list),
       words.length && line("small pad", words.join(", ")),
       words.length && !found.length && line("text", t.quiet),
-      words.length && matches.length && items("items", matches),
+      words.length && matches.length && items("items", this._area?.at ? matches.map(away) : matches),
       words.length && mentions.length && line("heading", t.mentioned),
       words.length && mentions.length && this._hits(mentions, data.at),
       deals.length && line("heading", t.deals),
@@ -556,7 +794,7 @@ class FoldersCard extends HTMLElement {
         ...items.map(([value, label, symbol, logo]) =>
           el(
             "button",
-            { type: "button", className: "chip", value, onclick: () => action(value) },
+            { type: "button", className: "chip", value, onclick: () => void action(value) },
             symbol && el("ha-icon", { icon: symbol }),
             logo && el("img", { src: logo, alt: "" }),
             label,
@@ -583,7 +821,7 @@ class FoldersCard extends HTMLElement {
     const cover = this._keep(first.cover, at);
     const show = el(
       "button",
-      { type: "button", className: "tile", onclick: () => this._read(first.id, 1, show) },
+      { type: "button", className: "tile", onclick: () => void this._read(first.id, 1, show) },
       el("img", cover ? { src: cover, alt: "", loading: "lazy" } : { alt: "" }),
       first.new === true && line("badge", t.new),
       line("name", text(store?.name)),
@@ -597,7 +835,7 @@ class FoldersCard extends HTMLElement {
       ...rest.map((folder) => {
         const item = el(
           "button",
-          { type: "button", className: "folder", onclick: () => this._read(folder.id, 1, item) },
+          { type: "button", className: "folder", onclick: () => void this._read(folder.id, 1, item) },
           line("", shortName(folder.name, store?.name)),
           line("small", when(folder)),
         );
@@ -659,7 +897,7 @@ class FoldersCard extends HTMLElement {
     const target = uuid(folder);
     const opens = target && !actions;
     const read = (opener) => this._read(target, item.page, opener);
-    const props = opens ? { type: "button", className: "show", onclick: () => read(show) } : { className: "show" };
+    const props = opens ? { type: "button", className: "show", onclick: () => void read(show) } : { className: "show" };
     const show = el(opens ? "button" : "div", props, ...parts);
     const go = target && actions && button("open", t.open, () => read(go));
     const label = [text(store), cost].filter(Boolean).join(", ");
@@ -680,7 +918,7 @@ class FoldersCard extends HTMLElement {
   _follow(value) {
     const { t } = this._texts();
     const word = clean(value).toLowerCase();
-    if (!fits(word)) this._note(t.short);
+    if (!fits(bare(word))) this._note(t.short);
     else this._add(this._watchList, word, `${t.watched}: ${word}`);
   }
 
@@ -702,8 +940,9 @@ class FoldersCard extends HTMLElement {
 
   async _search(value) {
     const { t } = this._texts();
-    const query = clean(value);
+    const query = bare(value);
     const asked = (this._sought = (this._sought || 0) + 1);
+    this._close();
     if (query !== this._found?.query) this._pick = undefined;
     this._found = { query, note: fits(query) ? t.busy : t.short };
     this._drawFound();
@@ -745,7 +984,7 @@ class FoldersCard extends HTMLElement {
     const near = results.some((item) => Number.isFinite(item.distance));
     const chain = (store) => {
       const logo = this._keep(store.logo, found.at);
-      const props = { type: "button", className: "chip", onclick: () => this._read(store.folder_id, 1, chip) };
+      const props = { type: "button", className: "chip", onclick: () => void this._read(store.folder_id, 1, chip) };
       const chip = el("button", props, logo && el("img", { src: logo, alt: "" }), text(store.name));
       return chip;
     };
@@ -1036,6 +1275,7 @@ class FoldersCard extends HTMLElement {
   _start() {
     const view = this.isConnected && this._config?.view;
     if (view === "folders" && this._hass && !this._busy && !this._again) this._refresh();
+    if (view === "folders" && this._hass && this._area && !this._placing && !this._later) this._around();
     if (view !== "map" || this._timer) return;
     this._timer = setInterval(() => this._tick(), 1000);
     if (!this._map && !this._token) this._build();
@@ -1047,11 +1287,14 @@ class FoldersCard extends HTMLElement {
     clearTimeout(this._again);
     clearTimeout(this._soon);
     clearTimeout(this._near);
-    this._timer = this._again = this._soon = this._near = this._seen = this._token = undefined;
-    this._busy = false;
+    clearTimeout(this._later);
+    this._timer = this._again = this._soon = this._near = this._later = this._seen = this._token = undefined;
+    this._busy = this._placing = false;
     this._asked = (this._asked || 0) + 1;
+    this._placed = (this._placed || 0) + 1;
     this._hunted = (this._hunted || 0) + 1;
     this._ready?.(false);
+    this._close();
   }
 
   async _build() {
@@ -1093,12 +1336,7 @@ class FoldersCard extends HTMLElement {
     this._kindRow = el("div", { className: "set" });
     this._storeRow = el("div", { className: "set" });
     this._mineText = el("span");
-    const finder = el("input", {
-      type: "search",
-      maxLength: 40,
-      enterKeyHint: "search",
-      onkeydown: (ev) => ev.key === "Enter" && !ev.isComposing && this._seek(finder.value),
-    });
+    const finder = el("input", { type: "search", maxLength: 40, enterKeyHint: "search" });
     this._finder = finder;
     this._seeker = button("go", "", () => this._seek(finder.value));
     const mine = el("input", {
@@ -1121,7 +1359,9 @@ class FoldersCard extends HTMLElement {
     });
     area.addEventListener("map-clicked", () => this._shut());
     this._map = map;
-    const search = el("div", { className: "search line" }, finder, this._seeker);
+    this._pointer = el("style", { textContent: POINTER });
+    const field = this._field(finder, (value) => this._seek(value));
+    const search = el("div", { className: "search line" }, field, this._seeker);
     const toggle = el("label", { className: "toggle" }, mine, this._mineText);
     const stores = el("div", { className: "bar" }, el("div", { className: "chips" }, this._storeRow));
     const bar = el("div", { className: "bar" }, el("div", { className: "chips" }, this._kindRow), toggle);
@@ -1162,6 +1402,8 @@ class FoldersCard extends HTMLElement {
     this._map.entities = [...Object.keys(this._shops), "zone.home"];
     this._map.hass = { ...hass, states };
     for (const [callback, unsubscribe] of this._consumers) callback(states, unsubscribe);
+    const root = this._map.shadowRoot;
+    if (root && this._pointer.parentNode !== root) root.append(this._pointer);
   }
 
   _bar() {
@@ -1170,6 +1412,7 @@ class FoldersCard extends HTMLElement {
     this._mineText.textContent = t.mine;
     this._seeker.textContent = t.find;
     Object.assign(this._finder, { placeholder: t.search, ariaLabel: t.search });
+    this._tips.box.ariaLabel = t.tips;
     this._row(this._kindRow, this._labels(this._slugs || []), (slug) => !this._off.has(slug), (slug) => {
       if (!this._off.delete(slug)) this._off.add(slug);
       this._show(...this._raw);
@@ -1366,9 +1609,10 @@ class FoldersCard extends HTMLElement {
 
   async _seek(value) {
     const { t } = this._texts();
-    const query = clean(value);
+    const query = bare(value);
     const asked = (this._hunted = (this._hunted || 0) + 1);
     clearTimeout(this._near);
+    this._close();
     this._spot = undefined;
     this._hunt = { query, note: fits(query) ? t.busy : t.short, results: [], ids: [] };
     this._drawHunt();
@@ -1424,7 +1668,7 @@ class FoldersCard extends HTMLElement {
       const hours = text(shop.hours);
       return el(
         "button",
-        { type: "button", className: "row near", onclick: () => this._open(shop, store, hunt.near) },
+        { type: "button", className: "row near", onclick: () => void this._open(shop, store, hunt.near) },
         el("img", logo ? { src: logo, alt: "" } : { alt: "" }),
         el(
           "div",

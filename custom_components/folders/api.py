@@ -34,6 +34,7 @@ OFFER_PAGES = 3
 FOLDER_PAGES = 400
 HIT_PAGES = 20
 HIT_LIMITS = (100, 25)
+SUGGEST_ROWS = 30
 OFFER_IMAGES = 5000
 DISCOUNT = ({"property": "DISCOUNT_SCORE", "direction": "DESC"},)
 RETRY_STATUSES = frozenset({429, 502, 503, 504})
@@ -54,6 +55,10 @@ FOLDER_QUERY = (
 FOLDER_OFFERS_QUERY = (
     "query($o: InputAffiliateCmsPublicationVariantPietTaggings!){ affiliateCmsPublicationVariantPietTaggings("
     "options:$o){ id data publicationVariantPageIndex interactionImageUrl } }"
+)
+SUGGEST_QUERY = (
+    "query($o: InputAffiliateCmsPietTaggingPagination!){ affiliateCmsPietTaggings(options:$o){ items{ data "
+    "publicationVariant{ id } } } }"
 )
 SEARCH_QUERY = (
     "query($o: InputAffiliateCmsSearchOptions!){ affiliateCmsSearch(options:$o){ publicationVariants{ page{ "
@@ -215,6 +220,7 @@ class Offer:
     valid_from: datetime
     valid_until: datetime
     word: str = ""
+    limit: float | None = None
     description: str | None = None
     product_category: str | None = None
 
@@ -541,6 +547,19 @@ class FoldersClient:
             if not more:
                 break
         return Found(offers, more, *await self._async_hits(text))
+
+    async def async_suggest(self, text: str) -> list[tuple[str, str]]:
+        variables = {"o": {"affiliateSlug": AFFILIATE, "search": text, "limit": SUGGEST_ROWS, "page": 1}}
+        block = await self._async_data(SUGGEST_QUERY, variables, "affiliateCmsPietTaggings")
+        if not isinstance(rows := block.get("items"), list):
+            raise FoldersError(UNEXPECTED)
+        key = normalize(text)
+        return [
+            (title, folder_id)
+            for row in _rows(rows)
+            if key in normalize(title := _text(_mapping(row.get("data")).get("title")))
+            and (folder_id := _match(_ID, _mapping(row.get("publicationVariant")).get("id")))
+        ]
 
     async def async_get_deals(self, limit: int, **options: str) -> list[Offer]:
         rows, _ = await self._async_page(

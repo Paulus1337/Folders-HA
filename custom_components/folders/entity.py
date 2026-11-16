@@ -7,7 +7,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .api import WEB_URL, Folder, Offer
 from .const import ATTRIBUTION, DOMAIN, NAME
-from .coordinator import FoldersCoordinator, FoldersData
+from .coordinator import FoldersCoordinator, FoldersData, Near
 
 
 def period(folder: Folder) -> dict[str, Any]:
@@ -29,6 +29,14 @@ def offer_attributes(data: FoldersData, offer: Offer) -> dict[str, Any]:
         "page": offer.page,
         "url": offer.url,
     }
+
+
+def nearby(near: Near | None) -> dict[str, Any]:
+    return {"distance": round(near[0], 1) if near else None, "address": (near[1].address or None) if near else None}
+
+
+def match_attributes(data: FoldersData, offer: Offer) -> dict[str, Any]:
+    return {"limit": offer.limit, **nearby(data.near.get(offer.store_id))}
 
 
 class FoldersEntity(CoordinatorEntity[FoldersCoordinator]):

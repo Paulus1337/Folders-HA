@@ -9,7 +9,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
 
 from .api import starts_with_store
-from .coordinator import FoldersConfigEntry, FoldersCoordinator, FoldersData
+from .coordinator import FoldersConfigEntry, FoldersCoordinator, FoldersData, Near
 from .entity import FoldersEntity
 
 PARALLEL_UPDATES = 0
@@ -44,19 +44,29 @@ def _plain(text: str) -> str:
     return _MARKDOWN.sub(r"\\\g<0>", text)
 
 
-def describe(data: FoldersData, word: str, language: str) -> str:
-    none, mentioned, until, page, days, months = TEXTS["nl" if language.startswith("nl") else "en"]
+def _far(near: Near | None, dutch: bool) -> str:
+    if near is None:
+        return ""
+    km, address = f"{near[0]:.1f}", near[1].address
+    return f", {km.replace('.', ',') if dutch else km} km" + (f", {_plain(address)}" if address else "")
+
+
+def describe(data: FoldersData, text: str, language: str) -> str:
+    dutch = language.startswith("nl")
+    none, mentioned, until, page, days, months = TEXTS["nl" if dutch else "en"]
 
     def day(moment: datetime) -> str:
         local = dt_util.as_local(moment)
         return f"{until} {days[local.weekday()]} {local.day} {months[local.month - 1]}"
 
-    if (offer := data.best.get(word)) is not None:
+    if (offer := data.best(text)) is not None:
         prices = list(dict.fromkeys(f"{price:.2f}" for price in (offer.sale_price, offer.price) if price))
         price = f", {prices[0]} (was {prices[1]})" if len(prices) == 2 else "".join(f", {item}" for item in prices)
         number = f", {page} {offer.page}" if offer.page else ""
-        return f"{_plain(data.stores[offer.store_id].name)}: {_plain(offer.title)}{price}, {day(offer.valid_until)}{number}"
-    if hits := data.mentions.get(word):
+        far = _far(data.near.get(offer.store_id), dutch)
+        store, title = _plain(data.stores[offer.store_id].name), _plain(offer.title)
+        return f"{store}: {title}{price}, {day(offer.valid_until)}{number}{far}"
+    if hits := data.mentions.get(text):
         folder, pages = hits[0]
         store = data.stores[folder.store_id].name
         name = _plain(folder.name or store)
@@ -87,12 +97,13 @@ class FoldersWatchList(FoldersEntity, TodoListEntity):
         data, language = self.coordinator.data, self.coordinator.hass.config.language
         return [
             TodoItem(
-                summary=item.word,
+                summary=text,
                 uid=item.uid,
                 status=TodoItemStatus.COMPLETED if item.paused else TodoItemStatus.NEEDS_ACTION,
-                description=None if item.paused or item.word not in data.best else describe(data, item.word, language),
+                description=None if item.paused or text not in data.matches else describe(data, text, language),
             )
             for item in self.coordinator.watch.items
+            for text in (item.watch.text,)
         ]
 
     @callback

@@ -8,7 +8,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .const import DEAL_LIMIT, OFFER_LIMIT
 from .coordinator import FoldersConfigEntry, FoldersCoordinator
-from .entity import FoldersEntity, offer_attributes
+from .entity import FoldersEntity, match_attributes, offer_attributes
 
 PARALLEL_UPDATES = 0
 
@@ -34,9 +34,9 @@ class FoldersOffers(FoldersEntity, SensorEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         data = self.coordinator.data
         return {
-            "words": list(data.words),
+            "words": list(data.watches),
             "offers": [
-                {**offer_attributes(data, offer), "description": offer.description}
+                {**offer_attributes(data, offer), "description": offer.description, **match_attributes(data, offer)}
                 for offer in data.offers[:OFFER_LIMIT]
             ],
         }

@@ -36,8 +36,14 @@
       "folders": {
         "name": "Folders",
         "state_attributes": {
+          "address": {
+            "name": "Adres"
+          },
           "description": {
             "name": "Omschrijving"
+          },
+          "distance": {
+            "name": "Afstand"
           },
           "event_type": {
             "state": {
@@ -51,6 +57,9 @@
           },
           "folder_id": {
             "name": "Folder-ID"
+          },
+          "limit": {
+            "name": "Prijsgrens"
           },
           "new_mentions": {
             "name": "Nieuwe vermeldingen"
@@ -149,6 +158,9 @@
   "exceptions": {
     "duplicate_word": {
       "message": "Dit woord staat al op de volglijst."
+    },
+    "invalid_limit": {
+      "message": "Gebruik een prijsgrens van 0,01 tot 9999 met hoogstens twee decimalen, bijvoorbeeld pindakaas < 2,50."
     },
     "invalid_word": {
       "message": "Gebruik een woord van 2 tot 40 tekens."

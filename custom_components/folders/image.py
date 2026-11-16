@@ -21,20 +21,22 @@ PAGE_LIMIT = 10 * 1024 * 1024
 async def async_setup_entry(
     hass: HomeAssistant, entry: FoldersConfigEntry, async_add_entities: AddConfigEntryEntitiesCallback
 ) -> None:
-    coordinator = entry.runtime_data
-    registry = er.async_get(hass)
-    registered: set[str] = set()
-    for item in er.async_entries_for_config_entry(registry, entry.entry_id):
-        if item.domain == "image":
-            if (store_id := item.unique_id.removeprefix(f"{entry.entry_id}_")) in coordinator.data.followed:
-                registered.add(store_id)
-            else:
-                registry.async_remove(item.entity_id)
+    coordinator, registry, prefix = entry.runtime_data, er.async_get(hass), f"{entry.entry_id}_"
+    registered = {
+        item.unique_id.removeprefix(prefix)
+        for item in er.async_entries_for_config_entry(registry, entry.entry_id)
+        if item.domain == "image"
+    }
     known: set[str] = set()
 
     @callback
     def async_add_stores() -> None:
         data = coordinator.data
+        for item in er.async_entries_for_config_entry(registry, entry.entry_id):
+            if item.domain == "image" and (store_id := item.unique_id.removeprefix(prefix)) not in data.followed:
+                registry.async_remove(item.entity_id)
+                registered.discard(store_id)
+                known.discard(store_id)
         new = [
             store
             for store_id, store in data.stores.items()

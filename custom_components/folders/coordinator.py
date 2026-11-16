@@ -16,7 +16,7 @@ from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
-from .api import Category, Folder, FoldersClient, FoldersError, Found, Offer, Store, plain, unique
+from .api import Category, Folder, FoldersClient, FoldersError, Found, Offer, QueryError, Shop, Store, plain, unique
 from .const import (
     CONF_ALWAYS_STORES,
     CONF_EXCLUDED_CATEGORIES,
@@ -28,18 +28,23 @@ from .const import (
     OTHER,
 )
 from .shops import ShopList
-from .watch import WatchList
+from .watch import Watch, WatchList
 
 type FoldersConfigEntry = ConfigEntry[FoldersCoordinator]
 type Catalog = tuple[dict[str, Store], dict[str, Category], dict[str, Category]]
 type Hit = tuple[Folder, tuple[int, ...]]
+type Near = tuple[float, Shop]
 
 UPDATE_INTERVAL = timedelta(hours=3)
 RETRY_INTERVAL = timedelta(minutes=15)
 STORES_INTERVAL = timedelta(days=1)
+DOUBT_TIME = timedelta(hours=6)
+KEEP_TIME = timedelta(hours=24)
+TRUST_COUNT = 20
 WATCH_DELAY = 5
 FOLDER_TIME = timedelta(hours=6)
 SEARCH_TIME = timedelta(minutes=10)
+SUGGEST_TIMEOUT = 5
 LIVE_ITEMS = 100
 TEXT_ITEMS = 20
 CATEGORY_DEALS = 30
@@ -100,6 +105,18 @@ def _mentions(
 
 
 @dataclass(frozen=True, slots=True)
+class Answers:
+    time: datetime
+    listed: datetime
+    catalog: Catalog
+    folders: list[Folder]
+    featured: frozenset[str]
+    found: dict[str, Found]
+    hits: dict[str, dict[str, tuple[int, ...]]]
+    deals: list[Offer]
+
+
+@dataclass(frozen=True, slots=True)
 class FoldersData:
     stores: dict[str, Store]
     categories: dict[str, Category]
@@ -108,13 +125,22 @@ class FoldersData:
     index: dict[str, Folder]
     followed: frozenset[str]
     featured: frozenset[str]
-    words: tuple[str, ...]
+    watches: dict[str, Watch]
     matches: dict[str, list[Offer]]
     offered: dict[str, frozenset[str]]
     offers: list[Offer]
-    best: dict[str, Offer | None]
     mentions: dict[str, list[Hit]]
     deals: list[Offer]
+    near: dict[str, Near]
+    trusted: datetime
+
+    def rank(self, offer: Offer) -> tuple[Any, ...]:
+        near = self.near.get(offer.store_id)
+        store = self.stores[offer.store_id].name.casefold()
+        return offer.ratio, near is None, near[0] if near else 0.0, store, offer.title.casefold()
+
+    def best(self, text: str) -> Offer | None:
+        return min(self.matches[text], key=self.rank, default=None)
 
 
 class FoldersCoordinator(DataUpdateCoordinator[FoldersData]):
@@ -125,11 +151,12 @@ class FoldersCoordinator(DataUpdateCoordinator[FoldersData]):
         self.client = FoldersClient(async_get_clientsession(hass))
         self.shops = ShopList(self)
         self.watch = WatchList(hass)
-        self._catalog: tuple[datetime, Catalog] | None = None
-        self._featured: frozenset[str] = frozenset()
-        self._hits: dict[str, dict[str, tuple[int, ...]]] = {}
+        self.failing = False
+        self._answers: Answers | None = None
+        self._doubt: tuple[tuple[str, ...], datetime] | None = None
         self._folders: dict[str, tuple[datetime, Any]] = {}
         self._searches: dict[str, tuple[datetime, Any]] = {}
+        self._suggestions: dict[str, tuple[datetime, Any]] = {}
         self._texts: dict[str, tuple[datetime, Any]] = {}
         self._themes: dict[str, tuple[datetime, Any]] = {}
         self._live = asyncio.Semaphore(2)
@@ -147,9 +174,10 @@ class FoldersCoordinator(DataUpdateCoordinator[FoldersData]):
         self._async_cancel_watch()
         self._unsub_watch = async_call_later(self.hass, WATCH_DELAY, self._async_watch_refresh)
 
-    async def _async_watch_refresh(self, _: datetime) -> None:
+    @callback
+    def _async_watch_refresh(self, _: datetime) -> None:
         self._unsub_watch = None
-        await self.async_refresh()
+        self.config_entry.async_create_background_task(self.hass, self.async_refresh(), f"{DOMAIN} watch refresh")
 
     async def _async_catalog(self) -> Catalog:
         stores = await self.client.async_get_stores()
@@ -174,46 +202,113 @@ class FoldersCoordinator(DataUpdateCoordinator[FoldersData]):
             *({"limit": STORE_DEALS, "retailerId": store_id} for store_id in always[:DEAL_STORES]),
         ]
 
+    async def _async_answers(self, now: datetime, watches: list[Watch]) -> Answers:
+        last = self._answers
+        if last is None or now - last.listed >= STORES_INTERVAL:
+            listed, catalog = now - STORES_INTERVAL if last is None else now, await self._async_catalog()
+        else:
+            listed, catalog = last.listed, last.catalog
+        folders = await self.client.async_get_folders()
+        featured = frozenset() if last is None else last.featured
+        with suppress(FoldersError):
+            featured = await self.client.async_get_featured()
+        found: dict[str, Found] = {}
+        for word in dict.fromkeys(watch.word for watch in watches):
+            try:
+                found[word] = await self.client.async_search(word)
+            except QueryError:
+                if last is not None and word in last.found:
+                    found[word] = last.found[word]
+        deals = [
+            offer
+            for request in self._deal_requests(catalog, followed_stores(self.config_entry.options, catalog[0]))
+            for offer in await self.client.async_get_deals(**request)
+        ]
+        known = {} if last is None else last.hits
+        hits = {
+            word: known[word] if result.folders is None else result.folders
+            for word, result in found.items()
+            if result.folders is not None or word in known
+        }
+        return Answers(now, listed, catalog, folders, featured, found, hits, deals)
+
+    def _doubts(self, answers: Answers, now: datetime) -> str | None:
+        last = self._answers
+        kind = tuple(
+            name
+            for name, count, before in (
+                ("stores", len(answers.catalog[0]), len(last.catalog[0]) if last else 0),
+                ("folders", len(answers.folders), len(last.folders) if last else 0),
+            )
+            if not count or (before >= TRUST_COUNT and count < before / 2)
+        )
+        doubt = self._doubt if self._doubt and self._doubt[0] == kind else (kind, now)
+        self._doubt = doubt if kind and now - doubt[1] < DOUBT_TIME else None
+        return f"folders.nl sent too few {' and '.join(kind)}" if self._doubt else None
+
     async def _async_update_data(self) -> FoldersData:
-        now, words, options = dt_util.utcnow(), tuple(self.watch.words), self.config_entry.options
+        now, watches = dt_util.utcnow(), self.watch.active
         try:
-            if self._catalog is None or now - self._catalog[0] >= STORES_INTERVAL:
-                self._catalog = (now, await self._async_catalog())
-            stores, categories, themes = catalog = self._catalog[1]
-            followed = followed_stores(options, stores)
-            folders = await self.client.async_get_folders()
-            with suppress(FoldersError):
-                self._featured = await self.client.async_get_featured()
-            found = {word: await self.client.async_search(word) for word in words}
-            deals = [
-                offer
-                for request in self._deal_requests(catalog, followed)
-                for offer in await self.client.async_get_deals(**request)
-            ]
+            answers = await self._async_answers(now, watches)
         except FoldersError as err:
-            self.update_interval = RETRY_INTERVAL
-            raise UpdateFailed(
-                translation_domain=DOMAIN, translation_key="update_failed", translation_placeholders={"error": str(err)}
-            ) from err
-        self.update_interval = UPDATE_INTERVAL
+            self._doubt, problem = None, str(err)
+        else:
+            problem = self._doubts(answers, now)
+        if problem is None:
+            if self.failing:
+                LOGGER.info("folders.nl answers again, showing the current folders")
+            self._answers, self.failing, self.update_interval = answers, False, UPDATE_INTERVAL
+        else:
+            last, self.update_interval = self._answers, RETRY_INTERVAL
+            if last is None or now - last.time >= KEEP_TIME:
+                self.failing = True
+                raise UpdateFailed(
+                    translation_domain=DOMAIN,
+                    translation_key="update_failed",
+                    translation_placeholders={"error": problem},
+                )
+            if not self.failing:
+                shown = dt_util.as_local(last.time).strftime("%Y-%m-%d %H:%M")
+                LOGGER.warning("folders.nl does not answer as expected (%s), showing the folders of %s", problem, shown)
+            self.failing, answers = True, last
+        data = self._build(answers, now, watches)
+        if data.watches:
+            self.shops.async_start(dt_util.utcnow(), data.stores.values())
+        return data
+
+    @callback
+    def async_shops_loaded(self) -> None:
+        if self._answers is not None and self.data is not None:
+            self.async_set_updated_data(self._build(self._answers, dt_util.utcnow(), self.watch.active))
+
+    def _build(self, answers: Answers, now: datetime, active: list[Watch]) -> FoldersData:
+        options, (stores, categories, themes) = self.config_entry.options, answers.catalog
+        followed = followed_stores(options, stores)
         hidden = set(options.get(CONF_EXCLUDED_THEMES, []))
         index = {
             folder.folder_id: folder
-            for folder in folders
+            for folder in answers.folders
             if folder.store_id in stores and folder.valid_until > now and hidden.isdisjoint(folder.themes)
         }
         grouped: dict[str, list[Folder]] = {}
         for folder in index.values():
             grouped.setdefault(folder.store_id, []).append(folder)
         watched = stores if options.get(CONF_WATCH_ALL) else followed
-        matches = {word: current_offers(result.offers, index, watched, now) for word, result in found.items()}
-        offered = {word: frozenset(offer.folder_id for offer in result.offers) for word, result in found.items()}
-        offers = unique(replace(offer, word=word) for word, items in matches.items() for offer in items)
-        self._hits = {
-            word: self._hits[word] if result.folders is None else result.folders
-            for word, result in found.items()
-            if result.folders is not None or word in self._hits
+        watches = {watch.text: watch for watch in active if watch.word in answers.found}
+        matches = {
+            text: [
+                replace(offer, word=watch.word, limit=watch.limit)
+                for offer in current_offers(answers.found[watch.word].offers, index, watched, now)
+                if watch.wants(offer)
+            ]
+            for text, watch in watches.items()
         }
+        offered = {
+            text: frozenset(offer.folder_id for offer in answers.found[watch.word].offers)
+            for text, watch in watches.items()
+        }
+        offers = unique(offer for items in matches.values() for offer in items)
+        config = self.hass.config
         return FoldersData(
             stores,
             categories,
@@ -221,14 +316,19 @@ class FoldersCoordinator(DataUpdateCoordinator[FoldersData]):
             {store_id: _shown(items, now) for store_id, items in grouped.items()},
             index,
             followed,
-            self._featured.intersection(index),
-            words,
+            answers.featured.intersection(index),
+            watches,
             matches,
             offered,
             sorted(offers, key=lambda offer: (stores[offer.store_id].name.casefold(), offer.title.casefold())),
-            {word: min(items, key=_RATIO, default=None) for word, items in matches.items()},
-            {word: _mentions(offered[word], hits, index, watched, stores) for word, hits in self._hits.items()},
-            sorted(current_offers(deals, index, followed, now), key=_RATIO),
+            {
+                text: _mentions(offered[text], answers.hits[watch.word], index, watched, stores)
+                for text, watch in watches.items()
+                if watch.limit is None and watch.word in answers.hits
+            },
+            sorted(current_offers(answers.deals, index, followed, now), key=_RATIO),
+            self.shops.nearest({offer.store_id for offer in offers}, config.latitude, config.longitude),
+            answers.time,
         )
 
     async def _async_live[T](
@@ -250,6 +350,14 @@ class FoldersCoordinator(DataUpdateCoordinator[FoldersData]):
 
     async def async_search(self, text: str) -> Found:
         return await self._async_live(self._searches, text, SEARCH_TIME, partial(self.client.async_search, text))
+
+    async def async_suggest(self, text: str) -> list[tuple[str, str]]:
+        fetch = partial(self.client.async_suggest, text)
+        try:
+            async with asyncio.timeout(SUGGEST_TIMEOUT):
+                return await self._async_live(self._suggestions, text, SEARCH_TIME, fetch)
+        except TimeoutError:
+            raise FoldersError("The suggestions took too long") from None
 
     async def async_folder(self, folder: Folder) -> tuple[int, list[Offer]]:
         return await self._async_live(

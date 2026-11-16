@@ -13,13 +13,12 @@ from homeassistant.util import dt as dt_util
 from .api import Folder, Offer
 from .const import EVENT_NEW_FOLDER, EVENT_NEW_MENTION, EVENT_NEW_OFFER
 from .coordinator import FoldersConfigEntry, FoldersCoordinator, FoldersData
-from .entity import FoldersEntity, period
+from .entity import FoldersEntity, nearby, period
 
 PARALLEL_UPDATES = 0
 FRESH = timedelta(days=3)
 OLD = datetime.min.replace(tzinfo=UTC)
 _START = attrgetter("valid_from")
-_RATIO = attrgetter("ratio")
 
 type Key = tuple[Any, ...]
 
@@ -41,9 +40,11 @@ def _offer(data: FoldersData, offer: Offer, count: int) -> dict[str, Any]:
         "sale_price": offer.sale_price,
         "description": offer.description,
         "word": offer.word,
+        "limit": offer.limit,
         "url": offer.url,
         "folder_id": offer.folder_id,
         "page": offer.page,
+        **nearby(data.near.get(offer.store_id)),
         "new_offers": count,
     }
 
@@ -75,7 +76,7 @@ class FoldersEvent(FoldersEntity, EventEntity):
 
     def _searched(self) -> dict[str, set[str]]:
         data = self.coordinator.data
-        return {EVENT_NEW_OFFER: set(data.words), EVENT_NEW_MENTION: set(data.mentions)}
+        return {EVENT_NEW_OFFER: set(data.watches), EVENT_NEW_MENTION: set(data.mentions)}
 
     def _new(self, until: datetime, now: datetime, *keys: Key) -> bool:
         new = until > now and self._seen.keys().isdisjoint(keys)
@@ -95,32 +96,33 @@ class FoldersEvent(FoldersEntity, EventEntity):
             if self._new(folder.valid_until, now, (EVENT_NEW_FOLDER, folder.folder_id))
         ]
         known = {
-            word: {key for offer in data.matches[word] for key in offer.identity}
-            for word in data.words
-            if word in words[EVENT_NEW_OFFER]
+            text: {key for offer in data.matches[text] for key in offer.identity}
+            for text in data.watches
+            if text in words[EVENT_NEW_OFFER]
         }
         offers: dict[str, list[Offer]] = {}
         for offer in data.offers:
-            word = next((word for word, keys in known.items() if not keys.isdisjoint(offer.identity)), None)
+            text = next((text for text, keys in known.items() if not keys.isdisjoint(offer.identity)), None)
             if (
                 self._new(offer.valid_until, now, *((EVENT_NEW_OFFER, key) for key in offer.identity))
-                and word
+                and text
                 and max(offer.valid_from, self._appeared[offer.folder_id]) > fresh
             ):
-                offers.setdefault(word, []).append(replace(offer, word=word))
-        for word in data.words:
-            for folder_id in data.index.keys() & data.offered[word]:
-                self._seen.setdefault((EVENT_NEW_MENTION, word, folder_id), data.index[folder_id].valid_until)
+                watch = data.watches[text]
+                offers.setdefault(text, []).append(replace(offer, word=watch.word, limit=watch.limit))
+        for text, watch in data.watches.items():
+            for folder_id in data.index.keys() & data.offered[text]:
+                self._seen.setdefault((EVENT_NEW_MENTION, text, folder_id), data.index[folder_id].valid_until)
             hits = [
                 (folder, pages)
-                for folder, pages in data.mentions.get(word, [])
-                if self._new(folder.valid_until, now, (EVENT_NEW_MENTION, word, folder.folder_id))
+                for folder, pages in data.mentions.get(text, [])
+                if self._new(folder.valid_until, now, (EVENT_NEW_MENTION, text, folder.folder_id))
                 and self._appeared[folder.folder_id] > fresh
             ]
-            if word in offers:
-                news.append((EVENT_NEW_OFFER, _offer(data, min(offers[word], key=_RATIO), len(offers[word]))))
-            if hits and word in words[EVENT_NEW_MENTION]:
-                news.append((EVENT_NEW_MENTION, _mention(data, word, *hits[0], len(hits))))
+            if text in offers:
+                news.append((EVENT_NEW_OFFER, _offer(data, min(offers[text], key=data.rank), len(offers[text]))))
+            if hits and text in words[EVENT_NEW_MENTION]:
+                news.append((EVENT_NEW_MENTION, _mention(data, watch.word, *hits[0], len(hits))))
         return news
 
     @callback

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import suppress
 from datetime import timedelta
 from http import HTTPStatus
+from operator import itemgetter
 import re
 import time
 from typing import Any
@@ -17,7 +19,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.util import dt as dt_util
 import voluptuous as vol
 
-from .api import FOLDER_PAGES, Folder, FoldersError, Offer, Shop, async_get_image, unique
+from .api import FOLDER_PAGES, Folder, FoldersError, Offer, Shop, async_get_image, normalize, unique
 from .const import (
     DOMAIN,
     HIT_LIMIT,
@@ -29,10 +31,12 @@ from .const import (
     SCOPES,
     SEARCH_LIMIT,
     STORE_IDS,
+    SUGGEST_STORES,
+    SUGGEST_TITLES,
     WORD_MENTIONS,
 )
 from .coordinator import FoldersCoordinator, FoldersData
-from .entity import offer_attributes, period
+from .entity import match_attributes, nearby, offer_attributes, period
 from .watch import clean
 
 IMAGE_LIMIT = 2 * 1024 * 1024
@@ -47,6 +51,7 @@ _UUID = re.compile(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}")
 _PAGE_KEY = re.compile(rf"({_UUID.pattern})\.([1-9][0-9]{{0,2}})")
 UUID = vol.All(str, vol.Lower, vol.Match(rf"{_UUID.pattern}\Z"))
 STORES = vol.All([UUID], vol.Length(min=1, max=STORE_IDS))
+_KM = itemgetter(1)
 
 type Signer = Callable[[str, str], str] | None
 
@@ -103,8 +108,7 @@ def _result(
         "valid_until": offer.valid_until.isoformat(),
         "upcoming": offer.valid_from > dt_util.utcnow(),
         "followed": offer.store_id in data.followed,
-        "distance": round(near[0], 1) if near else None,
-        "address": (near[1].address or None) if near else None,
+        **nearby(near),
     }
 
 
@@ -127,7 +131,7 @@ def _hit(data: FoldersData, folder: Folder, pages: tuple[int, ...], sign: Signer
 async def async_search_answer(
     coordinator: FoldersCoordinator, text: str, scope: str, sign: Signer = None
 ) -> dict[str, Any]:
-    coordinator.shops.async_start(dt_util.utcnow())
+    coordinator.shops.async_start(dt_util.utcnow(), coordinator.data.stores.values())
     found = await coordinator.async_search(text)
     data, now, hass = coordinator.data, dt_util.utcnow(), coordinator.hass
 
@@ -226,7 +230,7 @@ def _shop_list(hass: HomeAssistant, answer: dict[str, Any]) -> tuple[FoldersCoor
     if (coordinator := loaded_coordinator(hass)) is None:
         return None, {**answer, "status": "not_loaded"}
     shops = coordinator.shops
-    shops.async_start(dt_util.utcnow())
+    shops.async_start(dt_util.utcnow(), coordinator.data.stores.values())
     if shops.updated is None:
         return None, {**answer, "status": "loading" if shops.loading else "unavailable"}
     return coordinator, answer
@@ -286,6 +290,24 @@ def websocket_nearest(hass: HomeAssistant, connection: websocket_api.ActiveConne
             "shops": shops,
             "stores": _stores(data, [shop for _, shop in found], _signer(hass, connection)),
         }
+    connection.send_result(msg["id"], answer)
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/area",
+        vol.Inclusive("latitude", "point"): cv.latitude,
+        vol.Inclusive("longitude", "point"): cv.longitude,
+        vol.Optional("radius", default=5.0): vol.All(vol.Coerce(float), vol.Range(min=0.5, max=50)),
+    }
+)
+@callback
+def websocket_area(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    coordinator, answer = _shop_list(hass, {"status": "ok", "stores": {}})
+    if coordinator is not None:
+        latitude, longitude = msg.get("latitude", hass.config.latitude), msg.get("longitude", hass.config.longitude)
+        found = coordinator.shops.around(coordinator.data.folders, latitude, longitude, msg["radius"])
+        answer = {**answer, "stores": {store_id: round(km, 1) for store_id, km in sorted(found.items(), key=_KM)}}
     connection.send_result(msg["id"], answer)
 
 
@@ -357,7 +379,12 @@ async def _async_overview(
         "watch": {
             "words": coordinator.watch.words,
             "matches": [
-                {**offer_row(data, offer, sign), "description": offer.description, "word": offer.word}
+                {
+                    **offer_row(data, offer, sign),
+                    "description": offer.description,
+                    "word": offer.word,
+                    **match_attributes(data, offer),
+                }
                 for offer in matches
             ],
             "mentions": [
@@ -459,6 +486,48 @@ async def websocket_search(
             answer.update(await async_search_answer(coordinator, text, msg["scope"], _signer(hass, connection)))
         except FoldersError:
             answer["status"] = "unavailable"
+    connection.send_result(msg["id"], answer)
+
+
+def _suggested_products(data: FoldersData, found: list[tuple[str, str]]) -> list[dict[str, str]]:
+    now = dt_util.utcnow()
+    titles: dict[str, str] = {}
+    for title, folder_id in found:
+        if folder_id in data.index and data.index[folder_id].valid_until > now:
+            titles.setdefault(normalize(title), title)
+    return [{"title": title} for title in list(titles.values())[:SUGGEST_TITLES]]
+
+
+def _suggested_stores(data: FoldersData, key: str, sign: Callable[[str, str], str]) -> list[dict[str, Any]]:
+    stores = [data.stores[store_id] for store_id in data.folders if key in normalize(data.stores[store_id].name)]
+    stores.sort(key=lambda store: (not normalize(store.name).startswith(key), store.name.casefold()))
+    return [
+        {
+            "id": store.store_id,
+            "name": store.name,
+            "logo": sign("logo", store.store_id) if store.logo else None,
+            "folder_id": data.folders[store.store_id][0].folder_id,
+        }
+        for store in stores[:SUGGEST_STORES]
+    ]
+
+
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/suggest", vol.Required("query"): cv.string})
+@websocket_api.async_response
+async def websocket_suggest(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    if (text := clean(msg["query"])) is None:
+        connection.send_error(msg["id"], websocket_api.ERR_INVALID_FORMAT, INVALID_TEXT)
+        return
+    answer: dict[str, Any] = {"status": "ok", "products": [], "stores": []}
+    if (coordinator := loaded_coordinator(hass)) is None:
+        answer["status"] = "not_loaded"
+    elif key := normalize(text):
+        with suppress(FoldersError):
+            found = await coordinator.async_suggest(text)
+            answer["products"] = _suggested_products(coordinator.data, found)
+        answer["stores"] = _suggested_stores(coordinator.data, key, _signer(hass, connection))
     connection.send_result(msg["id"], answer)
 
 

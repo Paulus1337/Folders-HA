@@ -36,12 +36,14 @@ from .views import (
     loaded_coordinator,
     offer_row,
     search_text,
+    websocket_area,
     websocket_find,
     websocket_nearest,
     websocket_overview,
     websocket_pages,
     websocket_search,
     websocket_shops,
+    websocket_suggest,
 )
 from .watch import WatchList, watch_storage
 
@@ -111,9 +113,11 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     for command in (
         websocket_shops,
         websocket_nearest,
+        websocket_area,
         websocket_overview,
         websocket_pages,
         websocket_search,
+        websocket_suggest,
         websocket_find,
     ):
         websocket_api.async_register_command(hass, command)
@@ -144,8 +148,8 @@ async def async_migrate_entry(hass: HomeAssistant, entry: FoldersConfigEntry) ->
 async def async_setup_entry(hass: HomeAssistant, entry: FoldersConfigEntry) -> bool:
     coordinator = FoldersCoordinator(hass, entry)
     await coordinator.watch.async_load()
-    await coordinator.async_config_entry_first_refresh()
     await coordinator.shops.async_load()
+    await coordinator.async_config_entry_first_refresh()
     entry.runtime_data = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True

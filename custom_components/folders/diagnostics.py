@@ -22,7 +22,8 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: Folders
     images = [
         item for item in er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id) if item.domain == "image"
     ]
-    age = (dt_util.utcnow() - shops.updated).total_seconds() if shops.updated else None
+    now = dt_util.utcnow()
+    age = (now - shops.updated).total_seconds() if shops.updated else None
     return {
         **{
             key: len(options.get(key, []))
@@ -43,4 +44,6 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: Folders
         "shops": len(shops.shops),
         "shops_age_hours": None if age is None else round(age / 3600, 1),
         "last_update_success": coordinator.last_update_success,
+        "last_trusted_hours": round((now - data.trusted).total_seconds() / 3600, 1),
+        "failing": coordinator.failing,
     }
