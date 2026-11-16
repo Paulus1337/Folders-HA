@@ -64,9 +64,9 @@ def _shown(folders: list[Folder], now: datetime) -> list[Folder]:
     return [first, *sorted((folder for folder in folders if folder is not first), key=_START)]
 
 
-def _distinct(offers: Iterable[Offer]) -> list[Offer]:
+def _ranked(offers: Iterable[Offer]) -> list[Offer]:
     kept: dict[tuple[Any, ...], Offer] = {}
-    for offer in offers:
+    for offer in sorted(offers, key=_RATIO):
         kept.setdefault((offer.store_id, offer.title.casefold(), offer.price, offer.sale_price, offer.label), offer)
     return list(kept.values())
 
@@ -335,7 +335,7 @@ class FoldersCoordinator(DataUpdateCoordinator[FoldersData]):
                 for text, watch in watches.items()
                 if watch.limit is None and watch.word in answers.hits
             },
-            _distinct(sorted(current_offers(answers.deals, index, followed, now), key=_RATIO)),
+            _ranked(current_offers(answers.deals, index, followed, now)),
             self.shops.nearest({offer.store_id for offer in offers}, config.latitude, config.longitude),
             answers.time,
         )
@@ -369,16 +369,13 @@ class FoldersCoordinator(DataUpdateCoordinator[FoldersData]):
             raise FoldersError("The suggestions took too long") from None
 
     async def async_folder(self, folder: Folder) -> int:
-        if (count := self.page_count(folder.folder_id)) is not None:
+        if (count := self.page_count(folder_id := folder.folder_id)) is not None:
             return count
-        if (task := self._counting.get(folder.folder_id)) is None or task.done():
+        if (task := self._counting.get(folder_id)) is None or task.done():
             fetch = partial(self.client.async_get_folder, folder)
-            task = self._counting[folder.folder_id] = self.config_entry.async_create_background_task(
-                self.hass,
-                self._async_live(self._folders, folder.folder_id, timedelta.max, fetch, COUNT_ITEMS),
-                f"{DOMAIN} folder",
-            )
-            task.add_done_callback(partial(self._counted, folder.folder_id))
+            live = self._async_live(self._folders, folder_id, timedelta.max, fetch, COUNT_ITEMS)
+            task = self._counting[folder_id] = self.config_entry.async_create_background_task(self.hass, live, DOMAIN)
+            task.add_done_callback(partial(self._counted, folder_id))
         return await asyncio.shield(task)
 
     def _counted(self, folder_id: str, task: asyncio.Task[int]) -> None:
@@ -415,7 +412,7 @@ class FoldersCoordinator(DataUpdateCoordinator[FoldersData]):
             partial(self.client.async_get_deals, THEME_DEALS, themeId=label.category_id),
         )
         data = self.data
-        return _distinct(sorted(current_offers(offers, data.index, data.followed, dt_util.utcnow()), key=_RATIO))
+        return _ranked(current_offers(offers, data.index, data.followed, dt_util.utcnow()))
 
     def page_count(self, folder_id: str) -> int | None:
         return cached[1] if (cached := self._folders.get(folder_id)) else None

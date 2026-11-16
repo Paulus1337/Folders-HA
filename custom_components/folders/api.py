@@ -125,13 +125,11 @@ def _price(value: Any) -> float | None:
 
 
 def _note(value: Any) -> str | None:
-    text = _text(value)
-    return text if _WORD.search(text) else None
+    return text if _WORD.search(text := _text(value)) else None
 
 
-def _percent(label: str | None) -> float | None:
-    found = _PERCENT.search(label or "")
-    return float(found[1]) if found else None
+def _percent(label: str | None) -> float:
+    return float(found[1]) if (found := _PERCENT.search(label or "")) else 0.0
 
 
 def _page(index: Any) -> int | None:
@@ -236,9 +234,7 @@ class Offer:
 
     @property
     def ratio(self) -> float:
-        if self.price and self.sale_price:
-            return self.sale_price / self.price
-        return 1 - percent / 100 if (percent := _percent(self.label)) else 1.0
+        return self.sale_price / self.price if self.price and self.sale_price else 1 - _percent(self.label) / 100
 
     @property
     def identity(self) -> tuple[str, tuple[Any, ...]]:
