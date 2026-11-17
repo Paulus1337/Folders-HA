@@ -11,7 +11,6 @@
 
 <p align="center">
   <a href="https://github.com/Paulus1337/Folders-HA/releases"><img src="https://img.shields.io/github/v/release/Paulus1337/Folders-HA?style=flat-square" alt="Release"></a>
-  <a href="https://hacs.xyz"><img src="https://img.shields.io/badge/HACS-Custom-41BDF5?style=flat-square" alt="HACS custom repository"></a>
   <img src="https://img.shields.io/badge/Home%20Assistant-2025.8%2B-41BDF5?style=flat-square&logo=homeassistant&logoColor=white" alt="Home Assistant 2025.8 or newer">
   <a href="https://github.com/Paulus1337/Folders-HA/actions/workflows/validate.yml"><img src="https://img.shields.io/github/actions/workflow/status/Paulus1337/Folders-HA/validate.yml?branch=main&style=flat-square&label=validate" alt="Validate"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/Paulus1337/Folders-HA?style=flat-square" alt="License: MIT"></a>
@@ -42,12 +41,12 @@
 
 ## Requirements
 
-- Home Assistant 2025.8 or newer.
+- Home Assistant 2025.8 or newer. The Marketplace is built into Home Assistant 2026.11 and newer; on older versions install Folders with HACS or by hand.
 - No account is needed. folders.nl only covers stores in the Netherlands.
 
 ## Quick start
 
-1. Add this repository (`https://github.com/Paulus1337/Folders-HA`) to the Marketplace or HACS and install **Folders**. Restart Home Assistant if it asks you to.
+1. Search for **Folders** in the Marketplace or HACS and install it. Restart Home Assistant if it asks you to.
 2. Go to **Settings > Devices & services > Add integration > Folders** and select **Submit**: Folders follows every store. You can leave out categories, stores or themes there or later.
 3. Add the Folders card to a dashboard (see [The Folders card](#the-folders-card)), or use the [example dashboard](examples/dashboard.yaml).
 4. Add some words to the watch list, and import the [notification blueprint](#notifications).
@@ -57,10 +56,10 @@
 
 ### Marketplace or HACS (recommended)
 
-[![Open your Home Assistant instance and add this repository to the Marketplace or HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=Paulus1337&repository=Folders-HA&category=integration)
+1. Open the Marketplace (Home Assistant 2026.11 and newer) or HACS (older versions), search for **Folders** and install it. The button below opens it there directly.
+2. Restart Home Assistant if it asks you to.
 
-1. Click the button above. It opens the Marketplace (Home Assistant 2026.11 and newer) or HACS (older versions). You can also add `https://github.com/Paulus1337/Folders-HA` as a custom repository of type **Integration**.
-2. Install **Folders**. Restart Home Assistant if it asks you to.
+[![Open your Home Assistant instance and show Folders in the Marketplace or HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=Paulus1337&repository=Folders-HA&category=integration)
 
 ### Manual
 
@@ -339,7 +338,6 @@ Anyone who can open your Home Assistant can see the Folders entities, use the ca
 - A search shows at most 60 results and 30 folders that mention the text. Folders shows at most 400 pages of a folder. A search in a folder works only for folders whose text folders.nl has.
 - Which folders, offers and mentions were already seen is not kept over restarts. After a restart, reload or options change, the first update only remembers what exists, so nothing fires for what appeared meanwhile, and the folders that are there count as old: of those, only new offers in the first 3 days after the folder started can still fire.
 - The events only tell about fresh news. folders.nl answers at most 300 offers of a word and only a part of the folders that mention it, so for a broad word an older offer or mention can show up in a later answer, and then it never fires. A folder whose offers of a word drop out of the answer never fires as a mention of that word either.
-- Repositories added from a link are checked for updates by the Marketplace every 48 hours, and only when Home Assistant is connected to GitHub.
 
 ## Troubleshooting
 
